@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Profile.Participant.BibNumber}} · Marathon Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="runner-page">
+    <a class="back-link" href="/">← Dashboard</a>
+    <section class="runner-hero">
+      <div>
+        <p>{{.Event.Name}}</p>
+        <h1>{{.Profile.Participant.Name}}</h1>
+        <span>{{.Profile.Participant.BibNumber}}</span>
+      </div>
+      <div class="runner-status">
+        <strong>{{.Profile.Summary.Rank}}</strong>
+        <span>Current position</span>
+      </div>
+    </section>
+
+    <section class="metric-grid runner-metrics">
+      <article class="metric-card"><span>Race Status</span><strong>{{.Profile.Participant.Status}}</strong></article>
+      <article class="metric-card success"><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></article>
+      <article class="metric-card accent"><span>Checkpoint</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></article>
+      <article class="metric-card"><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></article>
+    </section>
+
+    <section class="runner-grid">
+      <article class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Checkpoint Timeline</h2>
+            <p>Server-time recorded progress</p>
+          </div>
+        </div>
+        <ol class="timeline">
+          {{range .Profile.Timeline}}
+            <li><strong>{{.Checkpoint.Name}}</strong><span>{{.Timestamp.Format "15:04:05"}}</span></li>
+          {{else}}
+            <li class="empty-state">No checkpoint records yet.</li>
+          {{end}}
+        </ol>
+      </article>
+
+      <article class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Segment Performance</h2>
+            <p>Time between checkpoints</p>
+          </div>
+        </div>
+        <ol class="feed-list">
+          {{range .Profile.Segments}}
+            <li><strong>{{.From}} → {{.To}}</strong><span>{{.Duration}}</span></li>
+          {{else}}
+            <li class="empty-state">Segment data appears after two checkpoint records.</li>
+          {{end}}
+        </ol>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

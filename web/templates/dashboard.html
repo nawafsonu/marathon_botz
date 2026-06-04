@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marathon Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="app-shell" data-page="dashboard">
+    <aside class="rail" aria-label="Primary navigation">
+      <div class="brand-mark">MT</div>
+      <nav>
+        <a class="active" href="/">Dashboard</a>
+        <a href="#checkpoint-entry">Checkpoint</a>
+        <a href="#leaderboard">Leaderboard</a>
+        <a href="/reports/final.csv">Export CSV</a>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="event-hero">
+        <div>
+          <h1>Marathon Tracker</h1>
+          <p>{{.Snapshot.Event.Name}} · {{.Snapshot.Event.Location}}</p>
+        </div>
+        <div class="hero-metrics" aria-label="Event details">
+          <div><strong>{{.Snapshot.Event.DistanceKM}} KM</strong><span>Distance</span></div>
+          <div><strong>{{.Snapshot.Summary.TotalParticipants}}</strong><span>Participants</span></div>
+          <div><strong>{{.Snapshot.Event.Date.Format "02 Jan 2006"}}</strong><span>Race date</span></div>
+        </div>
+      </header>
+
+      <section class="metric-grid" aria-label="Race summary">
+        <article class="metric-card accent">
+          <span>Total Participants</span>
+          <strong data-stat="total">{{.Snapshot.Summary.TotalParticipants}}</strong>
+        </article>
+        <article class="metric-card success">
+          <span>Finished</span>
+          <strong data-stat="finished">{{.Snapshot.Summary.Finished}}</strong>
+        </article>
+        <article class="metric-card">
+          <span>Active</span>
+          <strong data-stat="active">{{.Snapshot.Summary.Active}}</strong>
+        </article>
+        <article class="metric-card danger">
+          <span>DNF</span>
+          <strong data-stat="dnf">{{.Snapshot.Summary.DNF}}</strong>
+        </article>
+      </section>
+
+      <section class="operations-grid">
+        <section id="checkpoint-entry" class="panel checkpoint-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Checkpoint Entry</h2>
+              <p>Tablet-first race-day logging</p>
+            </div>
+            <span class="status-dot">Live</span>
+          </div>
+          <form id="checkpoint-form" class="stacked-form">
+            <label>
+              Checkpoint
+              <select name="checkpointId" required>
+                {{range .Snapshot.Checkpoints}}
+                  <option value="{{.ID}}">{{.Name}} · {{printf "%.0f" .DistanceKM}} KM</option>
+                {{end}}
+              </select>
+            </label>
+            <label>
+              Bib number
+              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="BIB-001" required autofocus>
+            </label>
+            <input type="hidden" name="volunteerId" value="volunteer-tablet-1">
+            <button type="submit">Submit</button>
+            <p class="form-status" id="checkpoint-status" role="status"></p>
+          </form>
+        </section>
+
+        <section class="panel registration-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Fast Registration</h2>
+              <p>Target completion under 20 seconds</p>
+            </div>
+          </div>
+          <form id="registration-form" class="stacked-form compact">
+            <label>
+              Full name
+              <input name="name" autocomplete="name" placeholder="Runner name" required>
+            </label>
+            <label>
+              Phone number
+              <input name="phoneNumber" autocomplete="tel" placeholder="+91 90000 10000" required>
+            </label>
+            <label>
+              Notes
+              <input name="notes" placeholder="Optional">
+            </label>
+            <button type="submit">Register runner</button>
+            <p class="form-status" id="registration-status" role="status"></p>
+          </form>
+        </section>
+
+        <section class="panel feed-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Live Race Feed</h2>
+              <p>Newest checkpoint activity first</p>
+            </div>
+          </div>
+          <ol id="live-feed" class="feed-list">
+            {{range .Snapshot.LiveFeed}}
+              <li><strong>{{.Participant.BibNumber}}</strong><span>{{.Checkpoint.Name}}</span><time>{{.Timestamp.Format "15:04:05"}}</time></li>
+            {{else}}
+              <li class="empty-state">No runners have reached this checkpoint yet.</li>
+            {{end}}
+          </ol>
+        </section>
+      </section>
+
+      <section id="leaderboard" class="panel leaderboard-panel">
+        <div class="section-heading">
+          <div>
+            <h2>Leaderboard</h2>
+            <p>Formula timing style ranking, refreshed every 5 seconds</p>
+          </div>
+          <span class="completion-rate"><span data-stat="completion">{{.Snapshot.Summary.CompletionRate}}</span>% complete</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Bib</th>
+                <th>Runner</th>
+                <th>Status</th>
+                <th>Latest Checkpoint</th>
+                <th>Finish Time</th>
+                <th>Gap</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body">
+              {{range .Snapshot.Leaderboard}}
+                <tr>
+                  <td class="rank">#{{.Rank}}</td>
+                  <td>{{.BibNumber}}</td>
+                  <td><a href="/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
+                  <td>{{.Status}}</td>
+                  <td>{{.LatestCheckpoint}}</td>
+                  <td>{{.FinishTime}}</td>
+                  <td>{{.Gap}}</td>
+                </tr>
+              {{else}}
+                <tr><td colspan="7" class="empty-state">No runners are registered yet.</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

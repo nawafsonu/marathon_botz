@@ -1,0 +1,13 @@
+*.log
+tmp-*
+
+# Go build/test artifacts
+bin/
+dist/
+coverage.out
+*.test
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
