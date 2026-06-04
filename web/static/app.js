@@ -4,6 +4,9 @@ const eventSettingsForm = document.querySelector("#event-settings-form");
 const eventCreateForm = document.querySelector("#event-create-form");
 const importForm = document.querySelector("#import-form");
 const checkpointManagerForm = document.querySelector("#checkpoint-manager-form");
+const startRaceForm = document.querySelector("#start-race-form");
+const volunteerForm = document.querySelector("#volunteer-form");
+const navigationSelects = document.querySelectorAll("[data-navigation-select]");
 const basePath = document.querySelector(".app-shell")?.dataset.basePath || "";
 
 const checkpointStatus = document.querySelector("#checkpoint-status");
@@ -12,6 +15,8 @@ const eventSettingsStatus = document.querySelector("#event-settings-status");
 const eventCreateStatus = document.querySelector("#event-create-status");
 const importStatus = document.querySelector("#import-status");
 const checkpointManagerStatus = document.querySelector("#checkpoint-manager-status");
+const startRaceStatus = document.querySelector("#start-race-status");
+const volunteerStatus = document.querySelector("#volunteer-status");
 
 function setStatus(node, message, kind = "") {
   if (!node) return;
@@ -52,6 +57,13 @@ checkpointForm?.addEventListener("submit", async (event) => {
   }
 });
 
+navigationSelects.forEach((select) => {
+  select.addEventListener("change", () => {
+    const nextURL = select.value;
+    if (nextURL) window.location.href = nextURL;
+  });
+});
+
 registrationForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(registrationForm);
@@ -67,6 +79,18 @@ registrationForm?.addEventListener("submit", async (event) => {
     await refreshState();
   } catch (error) {
     setStatus(registrationStatus, error.message, "error");
+  }
+});
+
+startRaceForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setStatus(startRaceStatus, "Starting race...");
+  try {
+    const eventData = await postJSON(`${basePath}/api/start-race`, {});
+    updateEvent(eventData);
+    setStatus(startRaceStatus, `${eventData.name} is active.`, "success");
+  } catch (error) {
+    setStatus(startRaceStatus, error.message, "error");
   }
 });
 
@@ -103,6 +127,40 @@ eventCreateForm?.addEventListener("submit", async (event) => {
   } catch (error) {
     setStatus(eventCreateStatus, error.message, "error");
   }
+});
+
+volunteerForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(volunteerForm);
+  setStatus(volunteerStatus, "Adding volunteer...");
+  try {
+    const user = await postJSON("/api/volunteers", {
+      username: form.get("username"),
+      password: form.get("password"),
+    });
+    setStatus(volunteerStatus, `${user.username} can now log in.`, "success");
+    window.location.reload();
+  } catch (error) {
+    setStatus(volunteerStatus, error.message, "error");
+  }
+});
+
+document.querySelectorAll("[data-delete-volunteer]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const username = button.dataset.deleteVolunteer;
+    setStatus(volunteerStatus, `Removing ${username}...`);
+    try {
+      const response = await fetch(`/api/volunteers/${encodeURIComponent(username)}/delete`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "Volunteer could not be removed.");
+      }
+      setStatus(volunteerStatus, `${username} removed.`, "success");
+      window.location.reload();
+    } catch (error) {
+      setStatus(volunteerStatus, error.message, "error");
+    }
+  });
 });
 
 checkpointManagerForm?.addEventListener("submit", async (event) => {
@@ -146,7 +204,7 @@ importForm?.addEventListener("submit", async (event) => {
 });
 
 async function refreshState() {
-  if (!document.querySelector("[data-page='dashboard']")) return;
+  if (!document.querySelector("[data-page='dashboard'], [data-page='race']")) return;
   const response = await fetch(`${basePath}/api/state`);
   if (!response.ok) return;
   const state = await response.json();
@@ -172,6 +230,8 @@ function updateEvent(eventData) {
       hour12: false,
     });
   }
+  const statusNode = document.querySelector("[data-event-status]");
+  if (statusNode) statusNode.textContent = eventData.status;
 }
 
 function updateStats(summary) {

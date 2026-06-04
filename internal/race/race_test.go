@@ -151,6 +151,31 @@ func TestUpdateEventSettingsChangesDistanceAndStartTime(t *testing.T) {
 	}
 }
 
+func TestStartRaceMarksEventActiveAndPersists(t *testing.T) {
+	event := seedEvent()
+	event.Status = EventStatusUpcoming
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+	store := &recordingStore{}
+	if err := svc.UseStore(store); err != nil {
+		t.Fatalf("use store: %v", err)
+	}
+
+	updated, err := svc.StartRace()
+	if err != nil {
+		t.Fatalf("start race: %v", err)
+	}
+
+	if updated.Status != EventStatusActive {
+		t.Fatalf("status = %s, want %s", updated.Status, EventStatusActive)
+	}
+	if svc.Event().Status != EventStatusActive {
+		t.Fatalf("service status = %s, want %s", svc.Event().Status, EventStatusActive)
+	}
+	if store.last.Event.Status != EventStatusActive {
+		t.Fatalf("persisted status = %s, want %s", store.last.Event.Status, EventStatusActive)
+	}
+}
+
 func TestImportParticipantsUsesMappedBibAndNameColumns(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 	rows := []ImportParticipant{

@@ -7,10 +7,13 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"marathon/internal/auth"
 	"marathon/internal/race"
 )
 
@@ -123,6 +126,69 @@ func TestEventSettingsEndpointUpdatesDistanceAndStartTime(t *testing.T) {
 	}
 }
 
+func TestStartRaceEndpointMarksSelectedEventActive(t *testing.T) {
+	event := testEvent()
+	event.Status = race.EventStatusUpcoming
+	svc := race.NewService(event, testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/start-race", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	var eventData race.Event
+	if err := json.NewDecoder(res.Body).Decode(&eventData); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	if eventData.Status != race.EventStatusActive {
+		t.Fatalf("event status = %s, want %s", eventData.Status, race.EventStatusActive)
+	}
+}
+
+func TestAuthRedirectsToLoginAndAllowsAdminVolunteerManagement(t *testing.T) {
+	manager, err := auth.NewManager(filepath.Join(t.TempDir(), "logincred.txt"))
+	if err != nil {
+		t.Fatalf("auth manager: %v", err)
+	}
+	handler := NewServer(nil, WithAuthManager(manager))
+
+	guestReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	guestRes := httptest.NewRecorder()
+	handler.ServeHTTP(guestRes, guestReq)
+	if guestRes.Code != http.StatusSeeOther || guestRes.Header().Get("Location") != "/login" {
+		t.Fatalf("guest status=%d location=%q, want redirect to /login", guestRes.Code, guestRes.Header().Get("Location"))
+	}
+
+	form := url.Values{"username": {"admin"}, "password": {"admin2026"}}
+	loginReq := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginRes := httptest.NewRecorder()
+	handler.ServeHTTP(loginRes, loginReq)
+	if loginRes.Code != http.StatusSeeOther {
+		t.Fatalf("login status=%d, want 303", loginRes.Code)
+	}
+	cookies := loginRes.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login did not set a session cookie")
+	}
+
+	payload := []byte(`{"username":"cp5","password":"cp52026"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/volunteers", bytes.NewReader(payload))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(cookies[0])
+	createRes := httptest.NewRecorder()
+	handler.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create volunteer status=%d, want 201; body: %s", createRes.Code, createRes.Body.String())
+	}
+	if _, ok := manager.Authenticate("cp5", "cp52026"); !ok {
+		t.Fatal("created volunteer could not authenticate")
+	}
+}
+
 func TestImportParticipantsEndpointUsesMappedColumns(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
 	handler := NewServer(svc)
@@ -202,6 +268,71 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	}
 	if !strings.Contains(raceRes.Body.String(), `<select name="name"`) {
 		t.Fatal("race page should render checkpoint name as a dropdown")
+	}
+	if !strings.Contains(raceRes.Body.String(), `id="start-race-form"`) {
+		t.Fatal("race page should render a start race form")
+	}
+	if !strings.Contains(raceRes.Body.String(), `Start Race`) {
+		t.Fatal("race page should render a start race button")
+	}
+}
+
+func TestRacePageCanSwitchRaceAndRegisterRunner(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc)
+
+	payload := []byte(`{"name":"Mumbai Marathon 2026","location":"Mumbai","distanceKm":21,"startTime":"2026-02-01T05:30:00Z"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRes := httptest.NewRecorder()
+	handler.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create event status = %d, want 201; body: %s", createRes.Code, createRes.Body.String())
+	}
+
+	raceReq := httptest.NewRequest(http.MethodGet, "/events/mumbai-marathon-2026/race", nil)
+	raceRes := httptest.NewRecorder()
+	handler.ServeHTTP(raceRes, raceReq)
+	if raceRes.Code != http.StatusOK {
+		t.Fatalf("race page status = %d, want 200; body: %s", raceRes.Code, raceRes.Body.String())
+	}
+	body := raceRes.Body.String()
+	if !strings.Contains(body, `id="race-selector"`) {
+		t.Fatal("race page should render a race selector")
+	}
+	if !strings.Contains(body, `/events/mumbai-marathon-2026/race`) {
+		t.Fatal("race selector should include the selected race page URL")
+	}
+	if !strings.Contains(body, `id="registration-form"`) {
+		t.Fatal("race page should render runner registration")
+	}
+}
+
+func TestDashboardFastRegistrationCanSelectRace(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc)
+
+	payload := []byte(`{"name":"Mumbai Marathon 2026","location":"Mumbai","distanceKm":21,"startTime":"2026-02-01T05:30:00Z"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRes := httptest.NewRecorder()
+	handler.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create event status = %d, want 201; body: %s", createRes.Code, createRes.Body.String())
+	}
+
+	dashboardReq := httptest.NewRequest(http.MethodGet, "/events/mumbai-marathon-2026", nil)
+	dashboardRes := httptest.NewRecorder()
+	handler.ServeHTTP(dashboardRes, dashboardReq)
+	if dashboardRes.Code != http.StatusOK {
+		t.Fatalf("dashboard status = %d, want 200; body: %s", dashboardRes.Code, dashboardRes.Body.String())
+	}
+	body := dashboardRes.Body.String()
+	if !strings.Contains(body, `id="registration-race-selector"`) {
+		t.Fatal("fast registration should render a race selector")
+	}
+	if !strings.Contains(body, `/events/mumbai-marathon-2026`) {
+		t.Fatal("fast registration race selector should include the selected dashboard URL")
 	}
 }
 

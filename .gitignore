@@ -2,6 +2,7 @@
 tmp-*
 .env
 .env.local
+logincred.txt
 
 # Go build/test artifacts
 bin/

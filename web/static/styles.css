@@ -50,6 +50,17 @@ select {
   max-width: 100%;
 }
 
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.login-panel {
+  width: min(100%, 28rem);
+}
+
 .rail {
   border-right: 1px solid var(--line);
   background: rgba(7, 8, 9, 0.9);
@@ -94,6 +105,43 @@ select {
   display: grid;
   gap: 1.5rem;
   min-width: 0;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.login-panel {
+  width: min(100%, 28rem);
+}
+
+.login-panel h1 {
+  font-size: clamp(2.4rem, 10vw, 4.5rem);
+}
+
+.logout-form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.logout-form button,
+.inline-danger {
+  min-height: 2.4rem;
+  background: #252b32;
+  color: var(--text);
+}
+
+.inline-danger {
+  width: auto;
+  padding: 0 0.8rem;
+  color: var(--danger);
 }
 
 .event-hero,
@@ -203,6 +251,55 @@ label {
   display: grid;
   grid-template-columns: minmax(20rem, 1.15fr) minmax(18rem, 0.85fr);
   gap: 1rem;
+}
+
+.race-ops-grid {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.85fr) minmax(20rem, 1.15fr);
+  gap: 1rem;
+}
+
+.race-selector-panel {
+  align-content: start;
+  display: grid;
+}
+
+.start-race-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 22rem);
+  gap: 1rem;
+  align-items: center;
+  border: 1px solid rgba(182, 255, 59, 0.32);
+  border-radius: 8px;
+  padding: 1.25rem;
+  background: linear-gradient(135deg, rgba(182, 255, 59, 0.14), rgba(17, 20, 23, 0.92) 58%);
+  box-shadow: var(--shadow);
+}
+
+.start-race-panel strong {
+  display: block;
+  color: var(--lime);
+  font-size: clamp(1.8rem, 4vw, 3.2rem);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.start-race-panel span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.start-race-button {
+  width: 100%;
+  min-height: 5rem;
+  background: var(--lime);
+  color: #111904;
+  font-size: clamp(1.2rem, 4vw, 2rem);
+  text-transform: uppercase;
+}
+
+.start-race-button:hover {
+  background: #d0ff65;
 }
 
 .race-entry-panel {
@@ -450,6 +547,8 @@ tbody tr:nth-child(-n + 3) {
   .event-hero,
   .runner-hero,
   .operations-grid,
+  .race-ops-grid,
+  .start-race-panel,
   .race-grid,
   .runner-grid {
     grid-template-columns: 1fr;

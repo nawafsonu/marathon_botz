@@ -1,7 +1,9 @@
 package web
 
 import (
+	"crypto/rand"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"marathon/internal/auth"
 	"marathon/internal/importer"
 	"marathon/internal/race"
 )
@@ -25,6 +28,9 @@ type Server struct {
 	projectStore race.Store
 	templates    *template.Template
 	staticDir    string
+	authManager  *auth.Manager
+	sessionMu    sync.RWMutex
+	sessions     map[string]string
 }
 
 type projectRegistry struct {
@@ -35,10 +41,12 @@ type projectRegistry struct {
 }
 
 type projectSummary struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Location string `json:"location"`
-	Active   bool   `json:"active"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Location     string `json:"location"`
+	Active       bool   `json:"active"`
+	DashboardURL string `json:"dashboardUrl"`
+	RaceURL      string `json:"raceUrl"`
 }
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
@@ -66,6 +74,8 @@ func WithProjectStore(store race.Store) Option {
 func WithProjectServices(services []*race.Service) Option {
 	return func(s *Server) {
 		if len(services) == 0 {
+			s.service = nil
+			s.projects = newProjectRegistry(nil)
 			return
 		}
 		s.service = services[0]
@@ -76,12 +86,19 @@ func WithProjectServices(services []*race.Service) Option {
 	}
 }
 
+func WithAuthManager(manager *auth.Manager) Option {
+	return func(s *Server) {
+		s.authManager = manager
+	}
+}
+
 func NewServer(service *race.Service, options ...Option) *Server {
 	server := &Server{
 		mux:       http.NewServeMux(),
 		service:   service,
 		projects:  newProjectRegistry(service),
 		staticDir: "web/static",
+		sessions:  make(map[string]string),
 	}
 	for _, option := range options {
 		option(server)
@@ -95,11 +112,17 @@ func NewServer(service *race.Service, options ...Option) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !s.authorize(w, r) {
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
 func (s *Server) routes() {
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.staticDir))))
+	s.mux.HandleFunc("GET /login", s.loginPage)
+	s.mux.HandleFunc("POST /login", s.login)
+	s.mux.HandleFunc("POST /logout", s.logout)
 	s.mux.HandleFunc("GET /", s.dashboard)
 	s.mux.HandleFunc("GET /race", s.racePage)
 	s.mux.HandleFunc("GET /runners/{bib}", s.runnerProfile)
@@ -108,10 +131,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}", s.runnerProfile)
 	s.mux.HandleFunc("GET /api/events", s.events)
 	s.mux.HandleFunc("POST /api/events", s.createEvent)
+	s.mux.HandleFunc("POST /api/volunteers", s.createVolunteer)
+	s.mux.HandleFunc("POST /api/volunteers/{username}/delete", s.deleteVolunteer)
 	s.mux.HandleFunc("GET /api/state", s.state)
 	s.mux.HandleFunc("GET /events/{eventID}/api/state", s.state)
 	s.mux.HandleFunc("POST /api/event-settings", s.updateEventSettings)
 	s.mux.HandleFunc("POST /events/{eventID}/api/event-settings", s.updateEventSettings)
+	s.mux.HandleFunc("POST /api/start-race", s.startRace)
+	s.mux.HandleFunc("POST /events/{eventID}/api/start-race", s.startRace)
 	s.mux.HandleFunc("POST /api/checkpoints", s.addCheckpoint)
 	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoints", s.addCheckpoint)
 	s.mux.HandleFunc("POST /api/participants", s.registerParticipant)
@@ -125,18 +152,40 @@ func (s *Server) routes() {
 }
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
-	service, ok := s.serviceForRequest(w, r)
+	var service *race.Service
+	var ok bool
+	if r.PathValue("eventID") == "" && s.service == nil {
+		ok = true
+	} else {
+		service, ok = s.serviceForRequest(w, r)
+	}
 	if !ok {
 		return
 	}
+	snapshot := race.Snapshot{}
+	basePath := ""
+	activeID := ""
+	if service != nil {
+		snapshot = service.Snapshot()
+		basePath = s.basePathFor(service.Event().ID)
+		activeID = service.Event().ID
+	}
 	data := struct {
-		Snapshot race.Snapshot
-		Projects []projectSummary
-		BasePath string
+		Snapshot    race.Snapshot
+		Projects    []projectSummary
+		BasePath    string
+		User        auth.User
+		Volunteers  []auth.User
+		AuthEnabled bool
+		CanManage   bool
 	}{
-		Snapshot: service.Snapshot(),
-		Projects: s.projectSummaries(service.Event().ID),
-		BasePath: s.basePathFor(service.Event().ID),
+		Snapshot:    snapshot,
+		Projects:    s.projectSummaries(activeID),
+		BasePath:    basePath,
+		User:        s.currentUser(r),
+		Volunteers:  s.volunteers(),
+		AuthEnabled: s.authManager != nil,
+		CanManage:   s.canManage(r),
 	}
 	if err := s.templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
 		http.Error(w, "dashboard could not be rendered", http.StatusInternalServerError)
@@ -149,13 +198,17 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := struct {
-		Snapshot race.Snapshot
-		Projects []projectSummary
-		BasePath string
+		Snapshot    race.Snapshot
+		Projects    []projectSummary
+		BasePath    string
+		User        auth.User
+		AuthEnabled bool
 	}{
-		Snapshot: service.Snapshot(),
-		Projects: s.projectSummaries(service.Event().ID),
-		BasePath: s.basePathFor(service.Event().ID),
+		Snapshot:    service.Snapshot(),
+		Projects:    s.projectSummaries(service.Event().ID),
+		BasePath:    s.basePathFor(service.Event().ID),
+		User:        s.currentUser(r),
+		AuthEnabled: s.authManager != nil,
 	}
 	if err := s.templates.ExecuteTemplate(w, "race.html", data); err != nil {
 		http.Error(w, "race page could not be rendered", http.StatusInternalServerError)
@@ -185,11 +238,70 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
+	if s.authManager == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	data := struct {
+		Error string
+	}{}
+	if err := s.templates.ExecuteTemplate(w, "login.html", data); err != nil {
+		http.Error(w, "login page could not be rendered", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.authManager == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "login form could not be read", http.StatusBadRequest)
+		return
+	}
+	user, ok := s.authManager.Authenticate(r.FormValue("username"), r.FormValue("password"))
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = s.templates.ExecuteTemplate(w, "login.html", struct{ Error string }{Error: "Invalid username or password"})
+		return
+	}
+	token, err := sessionToken()
+	if err != nil {
+		http.Error(w, "session could not be created", http.StatusInternalServerError)
+		return
+	}
+	s.sessionMu.Lock()
+	s.sessions[token] = user.Username
+	s.sessionMu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mt_session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie("mt_session"); err == nil {
+		s.sessionMu.Lock()
+		delete(s.sessions, cookie.Value)
+		s.sessionMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{Name: "mt_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.projectSummaries(s.projects.activeID))
 }
 
 func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	var input struct {
 		Name       string `json:"name"`
 		Location   string `json:"location"`
@@ -239,6 +351,45 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, event)
 }
 
+func (s *Server) createVolunteer(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if s.authManager == nil {
+		writeProblem(w, http.StatusNotFound, "volunteer management is not enabled")
+		return
+	}
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
+		return
+	}
+	user, err := s.authManager.AddVolunteer(input.Username, input.Password)
+	if err != nil {
+		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, user)
+}
+
+func (s *Server) deleteVolunteer(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if s.authManager == nil {
+		writeProblem(w, http.StatusNotFound, "volunteer management is not enabled")
+		return
+	}
+	if err := s.authManager.DeleteVolunteer(r.PathValue("username")); err != nil {
+		writeProblem(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	service, ok := s.serviceForRequest(w, r)
 	if !ok {
@@ -270,6 +421,9 @@ func (s *Server) registerParticipant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateEventSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	service, ok := s.serviceForRequest(w, r)
 	if !ok {
 		return
@@ -288,6 +442,19 @@ func (s *Server) updateEventSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event, err := service.UpdateEventSettings(input.DistanceKM, start)
+	if err != nil {
+		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
+}
+
+func (s *Server) startRace(w http.ResponseWriter, r *http.Request) {
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	event, err := service.StartRace()
 	if err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -326,6 +493,9 @@ func (s *Server) importRunners(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) addCheckpoint(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	service, ok := s.serviceForRequest(w, r)
 	if !ok {
 		return
@@ -422,6 +592,11 @@ func intString(value int) string {
 }
 
 func newProjectRegistry(service *race.Service) *projectRegistry {
+	if service == nil {
+		return &projectRegistry{
+			services: make(map[string]*race.Service),
+		}
+	}
 	defaultID := service.Event().ID
 	return &projectRegistry{
 		activeID: defaultID,
@@ -433,6 +608,10 @@ func newProjectRegistry(service *race.Service) *projectRegistry {
 func (s *Server) serviceForRequest(w http.ResponseWriter, r *http.Request) (*race.Service, bool) {
 	eventID := r.PathValue("eventID")
 	if eventID == "" {
+		if s.service == nil {
+			http.NotFound(w, r)
+			return nil, false
+		}
 		return s.service, true
 	}
 	s.projects.mu.RLock()
@@ -451,8 +630,15 @@ func (s *Server) addProject(id string, service *race.Service) error {
 	if _, exists := s.projects.services[id]; exists {
 		return errors.New("a marathon project with this name already exists")
 	}
+	if s.projects.services == nil {
+		s.projects.services = make(map[string]*race.Service)
+	}
 	s.projects.services[id] = service
 	s.projects.ids = append(s.projects.ids, id)
+	if s.projects.activeID == "" {
+		s.projects.activeID = id
+		s.service = service
+	}
 	return nil
 }
 
@@ -463,11 +649,19 @@ func (s *Server) projectSummaries(activeID string) []projectSummary {
 	for _, id := range s.projects.ids {
 		service := s.projects.services[id]
 		event := service.Event()
+		raceURL := "/events/" + event.ID + "/race"
+		dashboardURL := "/events/" + event.ID
+		if event.ID == s.projects.activeID {
+			raceURL = "/race"
+			dashboardURL = "/"
+		}
 		summaries = append(summaries, projectSummary{
-			ID:       event.ID,
-			Name:     event.Name,
-			Location: event.Location,
-			Active:   event.ID == activeID,
+			ID:           event.ID,
+			Name:         event.Name,
+			Location:     event.Location,
+			Active:       event.ID == activeID,
+			DashboardURL: dashboardURL,
+			RaceURL:      raceURL,
 		})
 	}
 	return summaries
@@ -478,6 +672,85 @@ func (s *Server) basePathFor(eventID string) string {
 		return ""
 	}
 	return "/events/" + eventID
+}
+
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
+	if s.authManager == nil {
+		return true
+	}
+	if r.URL.Path == "/login" || strings.HasPrefix(r.URL.Path, "/static/") {
+		return true
+	}
+	if _, ok := s.authenticatedUser(r); ok {
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/") || strings.Contains(r.URL.Path, "/api/") {
+		writeProblem(w, http.StatusUnauthorized, "login is required")
+		return false
+	}
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	return false
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if s.authManager == nil {
+		return true
+	}
+	user, ok := s.authenticatedUser(r)
+	if !ok {
+		writeProblem(w, http.StatusUnauthorized, "login is required")
+		return false
+	}
+	if user.Role != auth.RoleAdmin {
+		writeProblem(w, http.StatusForbidden, "admin access is required")
+		return false
+	}
+	return true
+}
+
+func (s *Server) currentUser(r *http.Request) auth.User {
+	user, _ := s.authenticatedUser(r)
+	return user
+}
+
+func (s *Server) canManage(r *http.Request) bool {
+	if s.authManager == nil {
+		return true
+	}
+	user, ok := s.authenticatedUser(r)
+	return ok && user.Role == auth.RoleAdmin
+}
+
+func (s *Server) authenticatedUser(r *http.Request) (auth.User, bool) {
+	if s.authManager == nil {
+		return auth.User{}, false
+	}
+	cookie, err := r.Cookie("mt_session")
+	if err != nil || cookie.Value == "" {
+		return auth.User{}, false
+	}
+	s.sessionMu.RLock()
+	username, ok := s.sessions[cookie.Value]
+	s.sessionMu.RUnlock()
+	if !ok {
+		return auth.User{}, false
+	}
+	return s.authManager.User(username)
+}
+
+func (s *Server) volunteers() []auth.User {
+	if s.authManager == nil {
+		return nil
+	}
+	return s.authManager.Volunteers()
+}
+
+func sessionToken() (string, error) {
+	var raw [24]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw[:]), nil
 }
 
 func defaultCheckpoints(distanceKM int) []race.Checkpoint {

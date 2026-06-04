@@ -259,6 +259,21 @@ func (s *Service) UpdateEventSettings(distanceKM int, startTime time.Time) (Even
 	return updated, nil
 }
 
+func (s *Service) StartRace() (Event, error) {
+	s.mu.Lock()
+	if s.event.Status == EventStatusCompleted {
+		s.mu.Unlock()
+		return Event{}, errors.New("completed races cannot be started")
+	}
+	s.event.Status = EventStatusActive
+	state := s.stateLocked()
+	store := s.store
+	updated := s.event
+	s.mu.Unlock()
+	persist(store, state)
+	return updated, nil
+}
+
 func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (Checkpoint, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

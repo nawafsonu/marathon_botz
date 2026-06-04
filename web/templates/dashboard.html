@@ -13,17 +13,25 @@
       <div class="brand-mark">MT</div>
       <nav>
         <a class="active" href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
-        <a href="{{.BasePath}}/race">Race</a>
-        <a href="#leaderboard">Leaderboard</a>
-        <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
+        {{if .Projects}}
+          <a href="{{.BasePath}}/race">Race</a>
+          <a href="#leaderboard">Leaderboard</a>
+          <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
+        {{end}}
       </nav>
+      {{if .AuthEnabled}}
+        <form method="post" action="/logout" class="logout-form">
+          <span>{{.User.Username}} - {{.User.Role}}</span>
+          <button type="submit">Logout</button>
+        </form>
+      {{end}}
     </aside>
 
     <main class="workspace">
       <header class="event-hero">
         <div>
           <h1>Marathon Tracker</h1>
-          <p>{{.Snapshot.Event.Name}} · {{.Snapshot.Event.Location}}</p>
+          <p>{{if .Projects}}{{.Snapshot.Event.Name}} - {{.Snapshot.Event.Location}}{{else}}No marathon created yet{{end}}</p>
         </div>
         <div class="hero-metrics" aria-label="Event details">
           <div><strong><span data-event-distance="{{.Snapshot.Event.DistanceKM}}">{{.Snapshot.Event.DistanceKM}}</span> KM</strong><span>Distance</span></div>
@@ -52,6 +60,23 @@
       </section>
 
       <section class="operations-grid">
+        {{if not .Projects}}
+          <section class="panel empty-setup-panel">
+            <div class="section-heading">
+              <div>
+                <h2>No Marathon Now</h2>
+                <p>Start by creating the first race. Existing race data has been cleared.</p>
+              </div>
+            </div>
+            {{if .CanManage}}
+              <p class="empty-state">Create the race, set distance and start time, then add checkpoints and volunteers.</p>
+            {{else}}
+              <p class="empty-state">Ask the admin to create a race. Volunteers can add participants and record checkpoints after setup.</p>
+            {{end}}
+          </section>
+        {{end}}
+
+        {{if .CanManage}}
         <section class="panel project-panel">
           <div class="section-heading">
             <div>
@@ -121,7 +146,9 @@
             <p class="form-status" id="event-settings-status" role="status"></p>
           </form>
         </section>
+        {{end}}
 
+        {{if .Projects}}
         <section class="panel registration-panel">
           <div class="section-heading">
             <div>
@@ -130,6 +157,14 @@
             </div>
           </div>
           <form id="registration-form" class="stacked-form compact">
+            <label>
+              Race
+              <select id="registration-race-selector" name="eventID" aria-label="Select race for fast registration" data-navigation-select>
+                {{range .Projects}}
+                  <option value="{{.DashboardURL}}" {{if .Active}}selected{{end}}>{{.Name}}</option>
+                {{end}}
+              </select>
+            </label>
             <label>
               Full name
               <input name="name" autocomplete="name" placeholder="Runner name" required>
@@ -181,7 +216,42 @@
             <p class="form-status" id="import-status" role="status"></p>
           </form>
         </section>
+        {{end}}
 
+        {{if .CanManage}}
+        <section class="panel volunteer-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Volunteer Logins</h2>
+              <p>Add or remove volunteer access saved in logincred.txt</p>
+            </div>
+          </div>
+          <form id="volunteer-form" class="stacked-form compact">
+            <label>
+              Username
+              <input name="username" placeholder="checkpoint5" required>
+            </label>
+            <label>
+              Password
+              <input name="password" placeholder="checkpoint52026" required>
+            </label>
+            <button type="submit">Add volunteer</button>
+            <p class="form-status" id="volunteer-status" role="status"></p>
+          </form>
+          <ol id="volunteer-list" class="checkpoint-list">
+            {{range .Volunteers}}
+              <li>
+                <strong>{{.Username}}</strong>
+                <button type="button" class="inline-danger" data-delete-volunteer="{{.Username}}">Remove</button>
+              </li>
+            {{else}}
+              <li class="empty-state">No volunteers yet.</li>
+            {{end}}
+          </ol>
+        </section>
+        {{end}}
+
+        {{if .Projects}}
         <section class="panel feed-panel">
           <div class="section-heading">
             <div>
@@ -197,8 +267,10 @@
             {{end}}
           </ol>
         </section>
+        {{end}}
       </section>
 
+      {{if .Projects}}
       <section id="leaderboard" class="panel leaderboard-panel">
         <div class="section-heading">
           <div>
@@ -238,6 +310,7 @@
           </table>
         </div>
       </section>
+      {{end}}
     </main>
   </div>
 </body>

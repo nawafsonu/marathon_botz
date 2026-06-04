@@ -32,6 +32,61 @@
         </div>
       </header>
 
+      <section class="start-race-panel" aria-label="Start race">
+        <div>
+          <strong data-event-status>{{.Snapshot.Event.Status}}</strong>
+          <span>{{.Snapshot.Event.Name}}</span>
+        </div>
+        <form id="start-race-form">
+          <button class="start-race-button" type="submit">Start Race</button>
+          <p class="form-status" id="start-race-status" role="status"></p>
+        </form>
+      </section>
+
+      <section class="race-ops-grid" aria-label="Race operations">
+        <section class="panel race-selector-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Select Race</h2>
+              <p>Switch marathon before adding runners or checkpoint entries</p>
+            </div>
+          </div>
+          <label>
+            Race
+            <select id="race-selector" name="eventID" aria-label="Select race" data-navigation-select>
+              {{range .Projects}}
+                <option value="{{.RaceURL}}" {{if .Active}}selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+          </label>
+        </section>
+
+        <section class="panel registration-panel race-registration-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Add Person</h2>
+              <p>Register runner into {{.Snapshot.Event.Name}}</p>
+            </div>
+          </div>
+          <form id="registration-form" class="stacked-form compact">
+            <label>
+              Full name
+              <input name="name" autocomplete="name" placeholder="Runner name" required>
+            </label>
+            <label>
+              Phone number
+              <input name="phoneNumber" autocomplete="tel" placeholder="+91 90000 10000" required>
+            </label>
+            <label>
+              Notes
+              <input name="notes" placeholder="Optional">
+            </label>
+            <button type="submit">Register runner</button>
+            <p class="form-status" id="registration-status" role="status"></p>
+          </form>
+        </section>
+      </section>
+
       <section class="race-grid">
         <section id="checkpoint-entry" class="panel checkpoint-panel race-entry-panel">
           <div class="section-heading">
