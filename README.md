@@ -7,6 +7,7 @@ Go-powered Marathon Tracker MVP for race organizers and checkpoint volunteers.
 - Live race command center dashboard.
 - Fast runner registration with generated `BIB-###` numbers.
 - Race setup controls for distance and start time.
+- Separate marathon projects, each with isolated runners, checkpoints, logs, leaderboard, and race-entry page.
 - Excel/CSV runner import with explicit column mapping for bib number, name, phone, and notes.
 - Tablet-friendly checkpoint entry with server-time logging.
 - Ordered checkpoint validation and duplicate prevention.
@@ -54,6 +55,17 @@ Invoke-WebRequest http://localhost:8080/reports/final.csv
 ```
 
 Runner import accepts `.xlsx` or `.csv` files with a header row. In the UI, type the exact header names for the number/bib column and name column. Phone and notes columns are optional.
+
+## Marathon Projects
+
+Each marathon is treated as a separate project. Create a new marathon from the dashboard, then use its project URL:
+
+```text
+/events/{marathon-id}
+/events/{marathon-id}/race
+```
+
+Registrations, imports, checkpoints, checkpoint logs, runner profiles, leaderboards, and CSV exports are scoped to that marathon.
 
 ## Product Notes
 

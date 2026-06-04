@@ -1,12 +1,15 @@
 const checkpointForm = document.querySelector("#checkpoint-form");
 const registrationForm = document.querySelector("#registration-form");
 const eventSettingsForm = document.querySelector("#event-settings-form");
+const eventCreateForm = document.querySelector("#event-create-form");
 const importForm = document.querySelector("#import-form");
 const checkpointManagerForm = document.querySelector("#checkpoint-manager-form");
+const basePath = document.querySelector(".app-shell")?.dataset.basePath || "";
 
 const checkpointStatus = document.querySelector("#checkpoint-status");
 const registrationStatus = document.querySelector("#registration-status");
 const eventSettingsStatus = document.querySelector("#event-settings-status");
+const eventCreateStatus = document.querySelector("#event-create-status");
 const importStatus = document.querySelector("#import-status");
 const checkpointManagerStatus = document.querySelector("#checkpoint-manager-status");
 
@@ -39,7 +42,7 @@ checkpointForm?.addEventListener("submit", async (event) => {
   };
   setStatus(checkpointStatus, "Recording checkpoint...");
   try {
-    const log = await postJSON("/api/checkpoint-logs", payload);
+    const log = await postJSON(`${basePath}/api/checkpoint-logs`, payload);
     setStatus(checkpointStatus, `${log.participant.bibNumber} recorded at ${log.checkpoint.name}.`, "success");
     checkpointForm.elements.namedItem("bibNumber").value = "";
     checkpointForm.elements.namedItem("bibNumber").focus();
@@ -54,7 +57,7 @@ registrationForm?.addEventListener("submit", async (event) => {
   const form = new FormData(registrationForm);
   setStatus(registrationStatus, "Registering runner...");
   try {
-    const participant = await postJSON("/api/participants", {
+    const participant = await postJSON(`${basePath}/api/participants`, {
       name: form.get("name"),
       phoneNumber: form.get("phoneNumber"),
       notes: form.get("notes"),
@@ -73,7 +76,7 @@ eventSettingsForm?.addEventListener("submit", async (event) => {
   const localStart = form.get("startTime");
   setStatus(eventSettingsStatus, "Saving race setup...");
   try {
-    const eventData = await postJSON("/api/event-settings", {
+    const eventData = await postJSON(`${basePath}/api/event-settings`, {
       distanceKm: Number(form.get("distanceKm")),
       startTime: new Date(localStart).toISOString(),
     });
@@ -84,12 +87,30 @@ eventSettingsForm?.addEventListener("submit", async (event) => {
   }
 });
 
+eventCreateForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(eventCreateForm);
+  setStatus(eventCreateStatus, "Creating marathon...");
+  try {
+    const created = await postJSON("/api/events", {
+      name: form.get("name"),
+      location: form.get("location"),
+      distanceKm: Number(form.get("distanceKm")),
+      startTime: new Date(form.get("startTime")).toISOString(),
+    });
+    setStatus(eventCreateStatus, `${created.name} created.`, "success");
+    window.location.href = `/events/${encodeURIComponent(created.id)}`;
+  } catch (error) {
+    setStatus(eventCreateStatus, error.message, "error");
+  }
+});
+
 checkpointManagerForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(checkpointManagerForm);
   setStatus(checkpointManagerStatus, "Adding checkpoint...");
   try {
-    const checkpoint = await postJSON("/api/checkpoints", {
+    const checkpoint = await postJSON(`${basePath}/api/checkpoints`, {
       name: form.get("name"),
       sequence: Number(form.get("sequence")),
       distanceKm: Number(form.get("distanceKm") || 0),
@@ -107,7 +128,7 @@ importForm?.addEventListener("submit", async (event) => {
   const form = new FormData(importForm);
   setStatus(importStatus, "Importing runners...");
   try {
-    const response = await fetch("/api/import-runners", {
+    const response = await fetch(`${basePath}/api/import-runners`, {
       method: "POST",
       body: form,
     });
@@ -126,7 +147,7 @@ importForm?.addEventListener("submit", async (event) => {
 
 async function refreshState() {
   if (!document.querySelector("[data-page='dashboard']")) return;
-  const response = await fetch("/api/state");
+  const response = await fetch(`${basePath}/api/state`);
   if (!response.ok) return;
   const state = await response.json();
   updateEvent(state.event);
@@ -216,7 +237,7 @@ function updateLeaderboard(entries) {
     <tr>
       <td class="rank">#${entry.rank}</td>
       <td>${escapeHTML(entry.bibNumber)}</td>
-      <td><a href="/runners/${encodeURIComponent(entry.bibNumber)}">${escapeHTML(entry.runnerName)}</a></td>
+      <td><a href="${basePath}/runners/${encodeURIComponent(entry.bibNumber)}">${escapeHTML(entry.runnerName)}</a></td>
       <td>${escapeHTML(entry.status)}</td>
       <td>${escapeHTML(entry.latestCheckpoint)}</td>
       <td>${escapeHTML(entry.finishTime)}</td>
