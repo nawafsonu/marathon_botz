@@ -42,6 +42,7 @@ checkpointForm?.addEventListener("submit", async (event) => {
   const form = new FormData(checkpointForm);
   const payload = {
     checkpointId: form.get("checkpointId"),
+    participantId: form.get("participantId"),
     bibNumber: String(form.get("bibNumber") || "").toUpperCase(),
     volunteerId: form.get("volunteerId"),
   };
@@ -50,7 +51,7 @@ checkpointForm?.addEventListener("submit", async (event) => {
     const log = await postJSON(`${basePath}/api/checkpoint-logs`, payload);
     setStatus(checkpointStatus, `${log.participant.bibNumber} recorded at ${log.checkpoint.name}.`, "success");
     checkpointForm.elements.namedItem("bibNumber").value = "";
-    checkpointForm.elements.namedItem("bibNumber").focus();
+    checkpointForm.elements.namedItem("participantId").focus();
     await refreshState();
   } catch (error) {
     setStatus(checkpointStatus, error.message, "error");
@@ -211,6 +212,7 @@ async function refreshState() {
   updateEvent(state.event);
   updateStats(state.summary);
   updateCheckpoints(state.checkpoints);
+  updateParticipants(state.participants);
   updateFeed(state.liveFeed);
   updateLeaderboard(state.leaderboard);
 }
@@ -267,6 +269,22 @@ function updateCheckpoints(checkpoints) {
     if (selected && [...select.options].some((option) => option.value === selected)) {
       select.value = selected;
     }
+  }
+}
+
+function updateParticipants(participants) {
+  const select = checkpointForm?.elements.namedItem("participantId");
+  if (!select) return;
+  const selected = select.value;
+  if (!participants.length) {
+    select.innerHTML = `<option value="">Register a runner first</option>`;
+    return;
+  }
+  select.innerHTML = participants.map((participant) => `
+    <option value="${escapeHTML(participant.id)}">${escapeHTML(participant.bibNumber)} · ${escapeHTML(participant.name)}</option>
+  `).join("");
+  if (selected && [...select.options].some((option) => option.value === selected)) {
+    select.value = selected;
   }
 }
 

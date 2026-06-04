@@ -84,6 +84,32 @@ func TestCheckpointEndpointRejectsOutOfOrderEntry(t *testing.T) {
 	}
 }
 
+func TestCheckpointEndpointAcceptsParticipantIDWithoutBib(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	participant, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "")
+	if err != nil {
+		t.Fatalf("register participant: %v", err)
+	}
+	handler := NewServer(svc)
+
+	payload := []byte(`{"participantId":"` + participant.ID + `","checkpointId":"start","volunteerId":"vol-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/checkpoint-logs", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", res.Code, res.Body.String())
+	}
+	var log race.CheckpointLog
+	if err := json.NewDecoder(res.Body).Decode(&log); err != nil {
+		t.Fatalf("decode log: %v", err)
+	}
+	if log.Participant.BibNumber != participant.BibNumber {
+		t.Fatalf("logged bib = %s, want %s", log.Participant.BibNumber, participant.BibNumber)
+	}
+}
+
 func TestFinalCSVExportContainsRankedRunners(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)
@@ -265,6 +291,9 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	}
 	if !strings.Contains(raceRes.Body.String(), "Race Checkpoint Entry") {
 		t.Fatal("race page should render race checkpoint entry")
+	}
+	if !strings.Contains(raceRes.Body.String(), `name="participantId"`) {
+		t.Fatal("race page should render a runner selector for checkpoint entry")
 	}
 	if !strings.Contains(raceRes.Body.String(), `<select name="name"`) {
 		t.Fatal("race page should render checkpoint name as a dropdown")

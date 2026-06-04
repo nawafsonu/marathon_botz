@@ -523,15 +523,31 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		BibNumber    string `json:"bibNumber"`
-		CheckpointID string `json:"checkpointId"`
-		VolunteerID  string `json:"volunteerId"`
+		BibNumber     string `json:"bibNumber"`
+		ParticipantID string `json:"participantId"`
+		CheckpointID  string `json:"checkpointId"`
+		VolunteerID   string `json:"volunteerId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return
 	}
-	log, err := service.RecordCheckpoint(input.BibNumber, input.CheckpointID, input.VolunteerID, time.Now().UTC())
+	bibNumber := input.BibNumber
+	if strings.TrimSpace(bibNumber) == "" && strings.TrimSpace(input.ParticipantID) != "" {
+		var found bool
+		for _, participant := range service.Participants() {
+			if participant.ID == strings.TrimSpace(input.ParticipantID) {
+				bibNumber = participant.BibNumber
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeProblem(w, http.StatusNotFound, race.ErrInvalidBib.Error())
+			return
+		}
+	}
+	log, err := service.RecordCheckpoint(bibNumber, input.CheckpointID, input.VolunteerID, time.Now().UTC())
 	if err != nil {
 		writeProblem(w, statusForRaceError(err), err.Error())
 		return

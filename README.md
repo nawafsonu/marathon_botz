@@ -14,6 +14,7 @@ Go-powered Marathon Tracker MVP for race organizers and checkpoint volunteers.
 - Live leaderboard and newest-first race feed.
 - Runner profile with checkpoint timeline and segment performance.
 - CSV final-results export.
+- Login-first workflow with one admin and four volunteer accounts stored locally in `logincred.txt`.
 
 ## Run Locally
 
@@ -23,6 +24,18 @@ go run ./cmd/marathon
 ```
 
 Open `http://localhost:8080`.
+
+On first run, the app creates `logincred.txt` locally:
+
+```text
+admin / admin2026
+volunteer1 / volunteer12026
+volunteer2 / volunteer22026
+volunteer3 / volunteer32026
+volunteer4 / volunteer42026
+```
+
+`logincred.txt` is intentionally gitignored. Admin users can create marathons, set race distance/start time, manage checkpoints, and add/remove volunteer logins. Volunteers can log in to add participants and record checkpoint entries for the selected race.
 
 Set a different port with:
 
@@ -71,9 +84,9 @@ Registrations, imports, checkpoints, checkpoint logs, runner profiles, leaderboa
 
 The current MVP supports MongoDB snapshot persistence and falls back to memory when no database is configured. MongoDB stores one `race_snapshots` document per marathon event ID, so each marathon project keeps isolated runners, checkpoints, logs, leaderboard state, and race setup across restarts.
 
-Production deployment should add:
+Production deployment should harden:
 
-- Admin and volunteer authentication.
+- Password hashing for `logincred.txt` or replacement with a managed identity store.
 - CSRF protection for browser writes.
 - Audit logs for checkpoint changes.
 - Rate limits for checkpoint and registration endpoints.
