@@ -19,11 +19,12 @@ import (
 )
 
 type Server struct {
-	mux       *http.ServeMux
-	service   *race.Service
-	projects  *projectRegistry
-	templates *template.Template
-	staticDir string
+	mux          *http.ServeMux
+	service      *race.Service
+	projects     *projectRegistry
+	projectStore race.Store
+	templates    *template.Template
+	staticDir    string
 }
 
 type projectRegistry struct {
@@ -56,16 +57,30 @@ func WithTemplates(pattern string) Option {
 	}
 }
 
+func WithProjectStore(store race.Store) Option {
+	return func(s *Server) {
+		s.projectStore = store
+	}
+}
+
+func WithProjectServices(services []*race.Service) Option {
+	return func(s *Server) {
+		if len(services) == 0 {
+			return
+		}
+		s.service = services[0]
+		s.projects = newProjectRegistry(services[0])
+		for _, service := range services[1:] {
+			_ = s.addProject(service.Event().ID, service)
+		}
+	}
+}
+
 func NewServer(service *race.Service, options ...Option) *Server {
-	defaultID := service.Event().ID
 	server := &Server{
-		mux:     http.NewServeMux(),
-		service: service,
-		projects: &projectRegistry{
-			activeID: defaultID,
-			ids:      []string{defaultID},
-			services: map[string]*race.Service{defaultID: service},
-		},
+		mux:       http.NewServeMux(),
+		service:   service,
+		projects:  newProjectRegistry(service),
 		staticDir: "web/static",
 	}
 	for _, option := range options {
@@ -211,6 +226,12 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 		Status:      race.EventStatusUpcoming,
 	}
 	service := race.NewService(event, defaultCheckpoints(input.DistanceKM), nil, 10*time.Minute)
+	if s.projectStore != nil {
+		if err := service.UseStore(s.projectStore); err != nil {
+			writeProblem(w, http.StatusInternalServerError, "marathon project could not be saved")
+			return
+		}
+	}
 	if err := s.addProject(id, service); err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -398,6 +419,15 @@ func writeProblem(w http.ResponseWriter, status int, detail string) {
 
 func intString(value int) string {
 	return strconv.Itoa(value)
+}
+
+func newProjectRegistry(service *race.Service) *projectRegistry {
+	defaultID := service.Event().ID
+	return &projectRegistry{
+		activeID: defaultID,
+		ids:      []string{defaultID},
+		services: map[string]*race.Service{defaultID: service},
+	}
 }
 
 func (s *Server) serviceForRequest(w http.ResponseWriter, r *http.Request) (*race.Service, bool) {

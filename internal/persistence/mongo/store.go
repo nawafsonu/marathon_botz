@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
-const snapshotDocumentID = "marathon-tracker-current-state"
+const legacySnapshotDocumentID = "marathon-tracker-current-state"
 
 type Store struct {
 	client     *mongodriver.Client
@@ -41,8 +41,16 @@ func Connect(ctx context.Context, uri string, database string) (*Store, error) {
 }
 
 func (s *Store) Load(ctx context.Context) (race.State, bool, error) {
+	state, found, err := s.LoadByID(ctx, "koch-2026")
+	if err != nil || found {
+		return state, found, err
+	}
+	return s.LoadByID(ctx, legacySnapshotDocumentID)
+}
+
+func (s *Store) LoadByID(ctx context.Context, id string) (race.State, bool, error) {
 	var document snapshotDocument
-	err := s.collection.FindOne(ctx, bson.M{"_id": snapshotDocumentID}).Decode(&document)
+	err := s.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&document)
 	if err != nil {
 		if err == mongodriver.ErrNoDocuments {
 			return race.State{}, false, nil
@@ -52,15 +60,43 @@ func (s *Store) Load(ctx context.Context) (race.State, bool, error) {
 	return document.State, true, nil
 }
 
+func (s *Store) LoadAll(ctx context.Context) ([]race.State, error) {
+	cursor, err := s.collection.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var states []race.State
+	for cursor.Next(ctx) {
+		var document snapshotDocument
+		if err := cursor.Decode(&document); err != nil {
+			return nil, err
+		}
+		if document.State.Event.ID == "" {
+			continue
+		}
+		states = append(states, document.State)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, err
+	}
+	return states, nil
+}
+
 func (s *Store) Save(ctx context.Context, state race.State) error {
+	id := state.Event.ID
+	if id == "" {
+		id = legacySnapshotDocumentID
+	}
 	document := snapshotDocument{
-		ID:        snapshotDocumentID,
+		ID:        id,
 		State:     state,
 		UpdatedAt: time.Now().UTC(),
 	}
 	_, err := s.collection.ReplaceOne(
 		ctx,
-		bson.M{"_id": snapshotDocumentID},
+		bson.M{"_id": id},
 		document,
 		options.Replace().SetUpsert(true),
 	)

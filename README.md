@@ -69,7 +69,9 @@ Registrations, imports, checkpoints, checkpoint logs, runner profiles, leaderboa
 
 ## Product Notes
 
-The current MVP supports MongoDB snapshot persistence and falls back to memory when no database is configured. Production deployment should add:
+The current MVP supports MongoDB snapshot persistence and falls back to memory when no database is configured. MongoDB stores one `race_snapshots` document per marathon event ID, so each marathon project keeps isolated runners, checkpoints, logs, leaderboard state, and race setup across restarts.
+
+Production deployment should add:
 
 - Admin and volunteer authentication.
 - CSRF protection for browser writes.

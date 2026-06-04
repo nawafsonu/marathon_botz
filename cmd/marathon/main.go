@@ -17,11 +17,10 @@ import (
 
 func main() {
 	loadDotEnv(".env")
-	service, disconnect := buildService()
+	server, disconnect := buildServer()
 	defer disconnect()
 
 	addr := ":" + env("PORT", "8080")
-	server := web.NewServer(service)
 
 	log.Printf("Marathon Tracker running at http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, server); err != nil {
@@ -29,13 +28,13 @@ func main() {
 	}
 }
 
-func buildService() (*race.Service, func()) {
+func buildServer() (*web.Server, func()) {
 	duplicateWindow := 10 * time.Minute
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
 		service := race.NewService(event(), checkpoints(), nil, duplicateWindow)
 		seedDemoRace(service)
-		return service, func() {}
+		return web.NewServer(service), func() {}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -46,30 +45,37 @@ func buildService() (*race.Service, func()) {
 		log.Printf("MongoDB persistence unavailable; using in-memory state: %v", err)
 		service := race.NewService(event(), checkpoints(), nil, duplicateWindow)
 		seedDemoRace(service)
-		return service, func() {}
+		return web.NewServer(service), func() {}
 	}
 
-	state, found, err := store.Load(ctx)
+	states, err := store.LoadAll(ctx)
 	if err != nil {
 		log.Printf("MongoDB state load failed; using seeded in-memory state: %v", err)
 		service := race.NewService(event(), checkpoints(), nil, duplicateWindow)
 		seedDemoRace(service)
-		return service, func() { _ = store.Disconnect(context.Background()) }
+		return web.NewServer(service), func() { _ = store.Disconnect(context.Background()) }
 	}
 
-	var service *race.Service
-	if found {
-		service = race.NewServiceFromState(state, duplicateWindow)
-		log.Printf("Loaded Marathon Tracker state from MongoDB")
-	} else {
-		service = race.NewService(event(), checkpoints(), nil, duplicateWindow)
+	if len(states) == 0 {
+		service := race.NewService(event(), checkpoints(), nil, duplicateWindow)
 		seedDemoRace(service)
 		log.Printf("Initialized Marathon Tracker seed state in MongoDB")
+		if err := service.UseStore(store); err != nil {
+			log.Printf("MongoDB initial save failed; continuing with in-memory state: %v", err)
+		}
+		return web.NewServer(service, web.WithProjectStore(store)), func() { _ = store.Disconnect(context.Background()) }
 	}
-	if err := service.UseStore(store); err != nil {
-		log.Printf("MongoDB initial save failed; continuing with in-memory state: %v", err)
+
+	services := make([]*race.Service, 0, len(states))
+	for _, state := range states {
+		service := race.NewServiceFromState(state, duplicateWindow)
+		if err := service.UseStore(store); err != nil {
+			log.Printf("MongoDB save hook failed for %s: %v", service.Event().ID, err)
+		}
+		services = append(services, service)
 	}
-	return service, func() { _ = store.Disconnect(context.Background()) }
+	log.Printf("Loaded %d Marathon Tracker project(s) from MongoDB", len(services))
+	return web.NewServer(services[0], web.WithProjectStore(store), web.WithProjectServices(services)), func() { _ = store.Disconnect(context.Background()) }
 }
 
 func event() race.Event {
