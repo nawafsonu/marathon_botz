@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 )
 
 func main() {
+	loadDotEnv(".env")
 	service, disconnect := buildService()
 	defer disconnect()
 
@@ -147,4 +149,32 @@ func databaseFromURI(uri string, fallback string) string {
 		return fallback
 	}
 	return database
+}
+
+func loadDotEnv(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			log.Printf("Ignoring invalid .env key %q: %v", key, err)
+		}
+	}
 }

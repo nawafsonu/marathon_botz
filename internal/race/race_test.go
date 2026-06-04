@@ -176,6 +176,26 @@ func TestImportParticipantsUsesMappedBibAndNameColumns(t *testing.T) {
 	}
 }
 
+func TestAddCheckpointInsertsCheckpointBySequence(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+
+	checkpoint, err := svc.AddCheckpoint("CP1.5", 3, 7.5)
+	if err != nil {
+		t.Fatalf("add checkpoint: %v", err)
+	}
+
+	if checkpoint.ID != "cp15" {
+		t.Fatalf("checkpoint id = %s, want cp15", checkpoint.ID)
+	}
+	checkpoints := svc.Checkpoints()
+	if checkpoints[2].Name != "CP1.5" || checkpoints[2].Sequence != 3 {
+		t.Fatalf("checkpoint was not inserted at sequence 3: %+v", checkpoints)
+	}
+	if checkpoints[3].Name != "CP2" || checkpoints[3].Sequence != 4 {
+		t.Fatalf("later checkpoints were not shifted: %+v", checkpoints)
+	}
+}
+
 type recordingStore struct {
 	last  State
 	saves int

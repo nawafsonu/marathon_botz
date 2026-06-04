@@ -8,14 +8,14 @@
   <script defer src="/static/app.js"></script>
 </head>
 <body>
-  <div class="app-shell" data-page="dashboard">
+  <div class="app-shell" data-page="dashboard" data-base-path="{{.BasePath}}">
     <aside class="rail" aria-label="Primary navigation">
       <div class="brand-mark">MT</div>
       <nav>
-        <a class="active" href="/">Dashboard</a>
-        <a href="#checkpoint-entry">Checkpoint</a>
+        <a class="active" href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
+        <a href="{{.BasePath}}/race">Race</a>
         <a href="#leaderboard">Leaderboard</a>
-        <a href="/reports/final.csv">Export CSV</a>
+        <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
       </nav>
     </aside>
 
@@ -26,9 +26,9 @@
           <p>{{.Snapshot.Event.Name}} · {{.Snapshot.Event.Location}}</p>
         </div>
         <div class="hero-metrics" aria-label="Event details">
-          <div><strong>{{.Snapshot.Event.DistanceKM}} KM</strong><span>Distance</span></div>
+          <div><strong><span data-event-distance="{{.Snapshot.Event.DistanceKM}}">{{.Snapshot.Event.DistanceKM}}</span> KM</strong><span>Distance</span></div>
           <div><strong>{{.Snapshot.Summary.TotalParticipants}}</strong><span>Participants</span></div>
-          <div><strong>{{.Snapshot.Event.Date.Format "02 Jan 2006"}}</strong><span>Race date</span></div>
+          <div><strong data-event-start="{{.Snapshot.Event.StartTime.Format "2006-01-02T15:04:05Z07:00"}}">{{.Snapshot.Event.StartTime.Format "15:04"}}</strong><span>Start time</span></div>
         </div>
       </header>
 
@@ -52,30 +52,73 @@
       </section>
 
       <section class="operations-grid">
-        <section id="checkpoint-entry" class="panel checkpoint-panel">
+        <section class="panel project-panel">
           <div class="section-heading">
             <div>
-              <h2>Checkpoint Entry</h2>
-              <p>Tablet-first race-day logging</p>
+              <h2>Marathon Projects</h2>
+              <p>Each marathon keeps separate runners, checkpoints, and logs</p>
             </div>
-            <span class="status-dot">Live</span>
           </div>
-          <form id="checkpoint-form" class="stacked-form">
+          <ol class="checkpoint-list project-list">
+            {{range .Projects}}
+              <li>
+                <a href="{{if .Active}}/{{else}}/events/{{.ID}}{{end}}"><strong>{{.Name}}</strong></a>
+                <span>{{if .Active}}Active{{else}}{{.Location}}{{end}}</span>
+              </li>
+            {{end}}
+          </ol>
+          <form id="event-create-form" class="stacked-form compact">
             <label>
-              Checkpoint
-              <select name="checkpointId" required>
-                {{range .Snapshot.Checkpoints}}
-                  <option value="{{.ID}}">{{.Name}} · {{printf "%.0f" .DistanceKM}} KM</option>
-                {{end}}
+              Marathon name
+              <input name="name" placeholder="Mumbai Marathon 2026" required>
+            </label>
+            <label>
+              Location
+              <input name="location" placeholder="Mumbai">
+            </label>
+            <div class="mapping-grid">
+              <label>
+                Distance
+                <select name="distanceKm" required>
+                  <option value="5">5 KM</option>
+                  <option value="10">10 KM</option>
+                  <option value="21">21 KM Half Marathon</option>
+                  <option value="42">42 KM Marathon</option>
+                </select>
+              </label>
+              <label>
+                Start time
+                <input name="startTime" type="datetime-local" required>
+              </label>
+            </div>
+            <button type="submit">Create marathon</button>
+            <p class="form-status" id="event-create-status" role="status"></p>
+          </form>
+        </section>
+
+        <section class="panel setup-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Race Setup</h2>
+              <p>Select marathon distance and start time</p>
+            </div>
+          </div>
+          <form id="event-settings-form" class="stacked-form compact">
+            <label>
+              Distance
+              <select name="distanceKm" required>
+                <option value="5">5 KM</option>
+                <option value="10">10 KM</option>
+                <option value="21">21 KM Half Marathon</option>
+                <option value="42" selected>42 KM Marathon</option>
               </select>
             </label>
             <label>
-              Bib number
-              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="BIB-001" required autofocus>
+              Start time
+              <input name="startTime" type="datetime-local" required>
             </label>
-            <input type="hidden" name="volunteerId" value="volunteer-tablet-1">
-            <button type="submit">Submit</button>
-            <p class="form-status" id="checkpoint-status" role="status"></p>
+            <button type="submit">Save race setup</button>
+            <p class="form-status" id="event-settings-status" role="status"></p>
           </form>
         </section>
 
@@ -101,6 +144,41 @@
             </label>
             <button type="submit">Register runner</button>
             <p class="form-status" id="registration-status" role="status"></p>
+          </form>
+        </section>
+
+        <section class="panel import-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Import Runners</h2>
+              <p>Upload Excel or CSV and map columns</p>
+            </div>
+          </div>
+          <form id="import-form" class="stacked-form compact" enctype="multipart/form-data">
+            <label>
+              Excel or CSV file
+              <input name="file" type="file" accept=".xlsx,.csv" required>
+            </label>
+            <div class="mapping-grid">
+              <label>
+                Number column
+                <input name="bibColumn" placeholder="Bib">
+              </label>
+              <label>
+                Name column
+                <input name="nameColumn" placeholder="Name" required>
+              </label>
+              <label>
+                Phone column
+                <input name="phoneColumn" placeholder="Phone">
+              </label>
+              <label>
+                Notes column
+                <input name="notesColumn" placeholder="Notes">
+              </label>
+            </div>
+            <button type="submit">Import runners</button>
+            <p class="form-status" id="import-status" role="status"></p>
           </form>
         </section>
 
@@ -147,7 +225,7 @@
                 <tr>
                   <td class="rank">#{{.Rank}}</td>
                   <td>{{.BibNumber}}</td>
-                  <td><a href="/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
+                  <td><a href="{{$.BasePath}}/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
                   <td>{{.Status}}</td>
                   <td>{{.LatestCheckpoint}}</td>
                   <td>{{.FinishTime}}</td>

@@ -6,6 +6,8 @@ Go-powered Marathon Tracker MVP for race organizers and checkpoint volunteers.
 
 - Live race command center dashboard.
 - Fast runner registration with generated `BIB-###` numbers.
+- Race setup controls for distance and start time.
+- Excel/CSV runner import with explicit column mapping for bib number, name, phone, and notes.
 - Tablet-friendly checkpoint entry with server-time logging.
 - Ordered checkpoint validation and duplicate prevention.
 - Live leaderboard and newest-first race feed.
@@ -36,7 +38,13 @@ $env:MONGODB_URI='your MongoDB connection string'
 go run ./cmd/marathon
 ```
 
-Do not commit real database credentials. If `MONGODB_DATABASE` is omitted, the app uses the database name from the URI path, falling back to `marathon_tracker`.
+You can also create a local `.env` file from `.env.example`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Then fill in `MONGODB_URI`. Do not commit real database credentials. If `MONGODB_DATABASE` is omitted, the app uses the database name from the URI path, falling back to `marathon_tracker`.
 
 ## Smoke Checks
 
@@ -44,6 +52,8 @@ Do not commit real database credentials. If `MONGODB_DATABASE` is omitted, the a
 Invoke-RestMethod http://localhost:8080/api/state
 Invoke-WebRequest http://localhost:8080/reports/final.csv
 ```
+
+Runner import accepts `.xlsx` or `.csv` files with a header row. In the UI, type the exact header names for the number/bib column and name column. Phone and notes columns are optional.
 
 ## Product Notes
 

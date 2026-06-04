@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,6 +102,147 @@ func TestFinalCSVExportContainsRankedRunners(t *testing.T) {
 	}
 	if rows[1][1] != "BIB-002" {
 		t.Fatalf("first ranked bib = %s, want BIB-002", rows[1][1])
+	}
+}
+
+func TestEventSettingsEndpointUpdatesDistanceAndStartTime(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+
+	payload := []byte(`{"distanceKm":21,"startTime":"2026-01-10T05:30:00Z"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/event-settings", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	if svc.Event().DistanceKM != 21 {
+		t.Fatalf("distance = %d, want 21", svc.Event().DistanceKM)
+	}
+}
+
+func TestImportParticipantsEndpointUsesMappedColumns(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("bibColumn", "Number")
+	_ = writer.WriteField("nameColumn", "Runner")
+	_ = writer.WriteField("phoneColumn", "Phone")
+	part, err := writer.CreateFormFile("file", "runners.csv")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = part.Write([]byte("Number,Runner,Phone\n301,Asha Roy,+91 1\n302,Vikram Sen,+91 2\n"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/import-runners", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", res.Code, res.Body.String())
+	}
+	var result race.ImportResult
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.Created != 2 || len(result.Errors) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if svc.Participants()[0].BibNumber != "BIB-301" {
+		t.Fatalf("first bib = %s", svc.Participants()[0].BibNumber)
+	}
+}
+
+func TestCheckpointManagementEndpointAddsCheckpoint(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc)
+
+	payload := []byte(`{"name":"CP1.5","sequence":3,"distanceKm":7.5}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/checkpoints", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", res.Code, res.Body.String())
+	}
+	if got := svc.Checkpoints()[2].Name; got != "CP1.5" {
+		t.Fatalf("inserted checkpoint = %s, want CP1.5", got)
+	}
+}
+
+func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+
+	dashboardReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	dashboardRes := httptest.NewRecorder()
+	handler.ServeHTTP(dashboardRes, dashboardReq)
+
+	raceReq := httptest.NewRequest(http.MethodGet, "/race", nil)
+	raceRes := httptest.NewRecorder()
+	handler.ServeHTTP(raceRes, raceReq)
+
+	if dashboardRes.Code != http.StatusOK || raceRes.Code != http.StatusOK {
+		t.Fatalf("dashboard status=%d race status=%d", dashboardRes.Code, raceRes.Code)
+	}
+	if strings.Contains(dashboardRes.Body.String(), "Race Checkpoint Entry") {
+		t.Fatal("dashboard should not render race checkpoint entry")
+	}
+	if !strings.Contains(raceRes.Body.String(), "Race Checkpoint Entry") {
+		t.Fatal("race page should render race checkpoint entry")
+	}
+}
+
+func TestEachMarathonProjectHasIsolatedParticipants(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc)
+
+	payload := []byte(`{"name":"Mumbai Marathon 2026","location":"Mumbai","distanceKm":21,"startTime":"2026-02-01T05:30:00Z"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRes := httptest.NewRecorder()
+	handler.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create event status = %d, want 201; body: %s", createRes.Code, createRes.Body.String())
+	}
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/events/mumbai-marathon-2026/api/participants", bytes.NewReader([]byte(`{"name":"Mumbai Runner","phoneNumber":"+91 1"}`)))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRes := httptest.NewRecorder()
+	handler.ServeHTTP(registerRes, registerReq)
+	if registerRes.Code != http.StatusCreated {
+		t.Fatalf("register in second event status = %d, want 201; body: %s", registerRes.Code, registerRes.Body.String())
+	}
+
+	defaultReq := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	defaultRes := httptest.NewRecorder()
+	handler.ServeHTTP(defaultRes, defaultReq)
+	var defaultState race.Snapshot
+	if err := json.NewDecoder(defaultRes.Body).Decode(&defaultState); err != nil {
+		t.Fatalf("decode default state: %v", err)
+	}
+	if defaultState.Summary.TotalParticipants != 0 {
+		t.Fatalf("default event participants = %d, want 0", defaultState.Summary.TotalParticipants)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/events/mumbai-marathon-2026/api/state", nil)
+	secondRes := httptest.NewRecorder()
+	handler.ServeHTTP(secondRes, secondReq)
+	var secondState race.Snapshot
+	if err := json.NewDecoder(secondRes.Body).Decode(&secondState); err != nil {
+		t.Fatalf("decode second state: %v", err)
+	}
+	if secondState.Summary.TotalParticipants != 1 {
+		t.Fatalf("second event participants = %d, want 1", secondState.Summary.TotalParticipants)
 	}
 }
 

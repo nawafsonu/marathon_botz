@@ -195,8 +195,32 @@ label {
 
 .operations-grid {
   display: grid;
-  grid-template-columns: minmax(18rem, 1.1fr) minmax(18rem, 0.9fr) minmax(18rem, 1fr);
+  grid-template-columns: repeat(2, minmax(18rem, 1fr));
   gap: 1rem;
+}
+
+.race-grid {
+  display: grid;
+  grid-template-columns: minmax(20rem, 1.15fr) minmax(18rem, 0.85fr);
+  gap: 1rem;
+}
+
+.race-entry-panel {
+  min-height: 34rem;
+}
+
+.race-entry-panel button {
+  min-height: 4rem;
+  font-size: 1.1rem;
+}
+
+.race-grid .feed-panel {
+  grid-column: 1 / -1;
+}
+
+.checkpoint-panel,
+.feed-panel {
+  grid-column: span 1;
 }
 
 .panel {
@@ -245,6 +269,12 @@ select {
   outline: none;
 }
 
+input[type="file"] {
+  display: flex;
+  align-items: center;
+  padding: 0.85rem 1rem;
+}
+
 input[name="bibNumber"] {
   min-height: 5rem;
   font-size: clamp(2rem, 8vw, 4rem);
@@ -286,8 +316,15 @@ button:hover {
   color: var(--danger);
 }
 
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
 .feed-list,
-.timeline {
+.timeline,
+.checkpoint-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -296,7 +333,8 @@ button:hover {
 }
 
 .feed-list li,
-.timeline li {
+.timeline li,
+.checkpoint-list li {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
@@ -306,8 +344,15 @@ button:hover {
 
 .feed-list span,
 .feed-list time,
-.timeline span {
+.timeline span,
+.checkpoint-list span {
   color: var(--muted);
+}
+
+.checkpoint-list {
+  margin-top: 1rem;
+  max-height: 14rem;
+  overflow: auto;
 }
 
 .empty-state {
@@ -405,6 +450,7 @@ tbody tr:nth-child(-n + 3) {
   .event-hero,
   .runner-hero,
   .operations-grid,
+  .race-grid,
   .runner-grid {
     grid-template-columns: 1fr;
     flex-direction: column;
@@ -428,8 +474,13 @@ tbody tr:nth-child(-n + 3) {
   }
 
   .feed-list li,
-  .timeline li {
+  .timeline li,
+  .checkpoint-list li {
     display: grid;
+  }
+
+  .mapping-grid {
+    grid-template-columns: 1fr;
   }
 
   .rail {

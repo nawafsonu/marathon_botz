@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Race · Marathon Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="app-shell" data-page="race" data-base-path="{{.BasePath}}">
+    <aside class="rail" aria-label="Primary navigation">
+      <div class="brand-mark">MT</div>
+      <nav>
+        <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
+        <a class="active" href="{{.BasePath}}/race">Race</a>
+        <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}#leaderboard">Leaderboard</a>
+        <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
+      </nav>
+    </aside>
+
+    <main class="workspace race-workspace">
+      <header class="event-hero race-hero">
+        <div>
+          <h1>Race Control</h1>
+          <p>{{.Snapshot.Event.Name}} · Select checkpoint and type chest number</p>
+        </div>
+        <div class="hero-metrics" aria-label="Race status">
+          <div><strong>{{len .Snapshot.Checkpoints}}</strong><span>Checkpoints</span></div>
+          <div><strong data-stat="active">{{.Snapshot.Summary.Active}}</strong><span>Active</span></div>
+          <div><strong data-stat="finished">{{.Snapshot.Summary.Finished}}</strong><span>Finished</span></div>
+        </div>
+      </header>
+
+      <section class="race-grid">
+        <section id="checkpoint-entry" class="panel checkpoint-panel race-entry-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Race Checkpoint Entry</h2>
+              <p>Large touch targets for volunteers on tablets</p>
+            </div>
+            <span class="status-dot">Live</span>
+          </div>
+          <form id="checkpoint-form" class="stacked-form">
+            <label>
+              Checkpoint
+              <select name="checkpointId" required>
+                {{range .Snapshot.Checkpoints}}
+                  <option value="{{.ID}}">{{.Name}} · {{printf "%.0f" .DistanceKM}} KM</option>
+                {{end}}
+              </select>
+            </label>
+            <label>
+              Chest number
+              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="BIB-001 or 001" required autofocus>
+            </label>
+            <input type="hidden" name="volunteerId" value="volunteer-tablet-1">
+            <button type="submit">Submit</button>
+            <p class="form-status" id="checkpoint-status" role="status"></p>
+          </form>
+        </section>
+
+        <section class="panel checkpoint-manager-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Manage Checkpoints</h2>
+              <p>Add race checkpoints in course order</p>
+            </div>
+          </div>
+          <form id="checkpoint-manager-form" class="stacked-form compact">
+            <div class="mapping-grid">
+              <label>
+                Checkpoint name
+                <input name="name" placeholder="CP4" required>
+              </label>
+              <label>
+                Sequence
+                <input name="sequence" type="number" min="1" step="1" placeholder="5" required>
+              </label>
+              <label>
+                Distance marker
+                <input name="distanceKm" type="number" min="0" step="0.1" placeholder="30">
+              </label>
+            </div>
+            <button type="submit">Add checkpoint</button>
+            <p class="form-status" id="checkpoint-manager-status" role="status"></p>
+          </form>
+          <ol id="checkpoint-list" class="checkpoint-list">
+            {{range .Snapshot.Checkpoints}}
+              <li><strong>{{.Name}}</strong><span>{{.Sequence}} · {{printf "%.1f" .DistanceKM}} KM</span></li>
+            {{end}}
+          </ol>
+        </section>
+
+        <section class="panel feed-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Recent Entries</h2>
+              <p>Newest chest-number submissions first</p>
+            </div>
+          </div>
+          <ol id="live-feed" class="feed-list">
+            {{range .Snapshot.LiveFeed}}
+              <li><strong>{{.Participant.BibNumber}}</strong><span>{{.Checkpoint.Name}}</span><time>{{.Timestamp.Format "15:04:05"}}</time></li>
+            {{else}}
+              <li class="empty-state">No runners have reached this checkpoint yet.</li>
+            {{end}}
+          </ol>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

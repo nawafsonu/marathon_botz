@@ -1,5 +1,7 @@
 *.log
 tmp-*
+.env
+.env.local
 
 # Go build/test artifacts
 bin/

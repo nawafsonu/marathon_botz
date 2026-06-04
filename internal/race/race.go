@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,8 @@ var (
 	ErrDuplicateEntry     = errors.New("checkpoint already recorded for this runner")
 	ErrOutOfOrderEntry    = errors.New("previous checkpoint must be recorded first")
 )
+
+var nonCheckpointIDChars = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Event struct {
 	ID          string      `json:"id"`
@@ -111,6 +114,24 @@ type RunnerProfile struct {
 	Timeline        []CheckpointLog    `json:"timeline"`
 	Segments        []Segment          `json:"segments"`
 	PositionHistory []LeaderboardEntry `json:"positionHistory"`
+}
+
+type ImportParticipant struct {
+	BibNumber   string `json:"bibNumber"`
+	Name        string `json:"name"`
+	PhoneNumber string `json:"phoneNumber"`
+	Notes       string `json:"notes"`
+}
+
+type ImportError struct {
+	Row     int    `json:"row"`
+	Message string `json:"message"`
+}
+
+type ImportResult struct {
+	Created      int           `json:"created"`
+	Participants []Participant `json:"participants"`
+	Errors       []ImportError `json:"errors"`
 }
 
 type Snapshot struct {
@@ -219,6 +240,68 @@ func (s *Service) Participants() []Participant {
 	return append([]Participant(nil), s.participants...)
 }
 
+func (s *Service) UpdateEventSettings(distanceKM int, startTime time.Time) (Event, error) {
+	if distanceKM <= 0 {
+		return Event{}, errors.New("distance must be greater than zero")
+	}
+	if startTime.IsZero() {
+		return Event{}, errors.New("start time is required")
+	}
+
+	s.mu.Lock()
+	s.event.DistanceKM = distanceKM
+	s.event.StartTime = startTime.UTC()
+	state := s.stateLocked()
+	store := s.store
+	updated := s.event
+	s.mu.Unlock()
+	persist(store, state)
+	return updated, nil
+}
+
+func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (Checkpoint, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Checkpoint{}, errors.New("checkpoint name is required")
+	}
+	if sequence <= 0 {
+		return Checkpoint{}, errors.New("checkpoint sequence must be greater than zero")
+	}
+	if distanceKM < 0 {
+		return Checkpoint{}, errors.New("checkpoint distance cannot be negative")
+	}
+
+	s.mu.Lock()
+	id := checkpointID(name)
+	if id == "" {
+		s.mu.Unlock()
+		return Checkpoint{}, errors.New("checkpoint name must include letters or numbers")
+	}
+	if _, exists := s.checkpointByID[id]; exists {
+		s.mu.Unlock()
+		return Checkpoint{}, fmt.Errorf("%s already exists", name)
+	}
+	for i := range s.checkpoints {
+		if s.checkpoints[i].Sequence >= sequence {
+			s.checkpoints[i].Sequence++
+		}
+	}
+	checkpoint := Checkpoint{ID: id, Name: name, Sequence: sequence, DistanceKM: distanceKM}
+	s.checkpoints = append(s.checkpoints, checkpoint)
+	sort.Slice(s.checkpoints, func(i, j int) bool {
+		return s.checkpoints[i].Sequence < s.checkpoints[j].Sequence
+	})
+	s.checkpointByID[id] = checkpoint
+	for _, item := range s.checkpoints {
+		s.checkpointByID[item.ID] = item
+	}
+	state := s.stateLocked()
+	store := s.store
+	s.mu.Unlock()
+	persist(store, state)
+	return checkpoint, nil
+}
+
 func (s *Service) RegisterParticipant(name, phone, notes string) (Participant, error) {
 	name = strings.TrimSpace(name)
 	phone = strings.TrimSpace(phone)
@@ -246,6 +329,25 @@ func (s *Service) RegisterParticipant(name, phone, notes string) (Participant, e
 	s.mu.Unlock()
 	persist(store, state)
 	return participant, nil
+}
+
+func (s *Service) ImportParticipants(rows []ImportParticipant) ImportResult {
+	result := ImportResult{}
+	s.mu.Lock()
+	for i, row := range rows {
+		participant, err := s.importParticipantLocked(row)
+		if err != nil {
+			result.Errors = append(result.Errors, ImportError{Row: i + 2, Message: err.Error()})
+			continue
+		}
+		result.Created++
+		result.Participants = append(result.Participants, participant)
+	}
+	state := s.stateLocked()
+	store := s.store
+	s.mu.Unlock()
+	persist(store, state)
+	return result
 }
 
 func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, at time.Time) (CheckpointLog, error) {
@@ -300,6 +402,37 @@ func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, 
 	s.mu.Unlock()
 	persist(store, state)
 	return log, nil
+}
+
+func (s *Service) importParticipantLocked(row ImportParticipant) (Participant, error) {
+	name := strings.TrimSpace(row.Name)
+	if name == "" {
+		return Participant{}, errors.New("runner name is required")
+	}
+	bib := normalizeBib(row.BibNumber)
+	if bib == "" {
+		bib = fmt.Sprintf("BIB-%03d", s.nextParticipant)
+	}
+	if _, exists := s.participantByBib[bib]; exists {
+		return Participant{}, fmt.Errorf("%s already exists", bib)
+	}
+	participant := Participant{
+		ID:          fmt.Sprintf("runner-%03d", s.nextParticipant),
+		BibNumber:   bib,
+		Name:        name,
+		PhoneNumber: strings.TrimSpace(row.PhoneNumber),
+		Notes:       strings.TrimSpace(row.Notes),
+		Status:      RaceStatusRegistered,
+		CreatedAt:   time.Now().UTC(),
+	}
+	s.participants = append(s.participants, participant)
+	s.participantByBib[participant.BibNumber] = len(s.participants) - 1
+	if n := bibNumber(participant.BibNumber); n >= s.nextParticipant {
+		s.nextParticipant = n + 1
+	} else {
+		s.nextParticipant++
+	}
+	return participant, nil
 }
 
 func (s *Service) MarkDNF(bibNumber string) error {
@@ -623,6 +756,27 @@ func bibNumber(bib string) int {
 		return 0
 	}
 	return n
+}
+
+func normalizeBib(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	value = strings.TrimPrefix(value, "#")
+	value = strings.TrimPrefix(value, "BIB-")
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return strings.ToUpper(strings.TrimSpace(value))
+	}
+	return fmt.Sprintf("BIB-%03d", n)
+}
+
+func checkpointID(name string) string {
+	value := strings.ToLower(strings.TrimSpace(name))
+	value = strings.ReplaceAll(value, ".", "")
+	value = nonCheckpointIDChars.ReplaceAllString(value, "")
+	return value
 }
 
 func logNumber(id string) int {
