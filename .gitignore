@@ -8,6 +8,7 @@ bin/
 dist/
 coverage.out
 *.test
+/app
 
 # OS/editor noise
 .DS_Store

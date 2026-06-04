@@ -78,11 +78,17 @@ The current MVP supports MongoDB snapshot persistence and falls back to memory w
 
 ## Deployment Notes
 
-For Render, configure a Go web service:
+This repo includes `render.yaml` for Render Blueprint deployment. It defines one Go web service named `marathon-tracker`.
 
-- Build command: `go build -o marathon ./cmd/marathon`
-- Start command: `./marathon`
+- Build command: `go mod download && go build -tags netgo -ldflags '-s -w' -o app ./cmd/marathon`
+- Start command: `./app`
 - Environment: `PORT` is supplied by Render.
 - Secret environment variables: set `MONGODB_URI`; optionally set `MONGODB_DATABASE`.
+
+Recommended pre-deploy validation when the Render CLI is installed:
+
+```powershell
+render blueprints validate
+```
 
 MongoDB is now the configured persistence target for this Go MVP. Use a restricted database user and rotate credentials before public deployment if the connection string has been shared outside a secure secret manager.

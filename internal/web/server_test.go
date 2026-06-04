@@ -200,6 +200,9 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	if !strings.Contains(raceRes.Body.String(), "Race Checkpoint Entry") {
 		t.Fatal("race page should render race checkpoint entry")
 	}
+	if !strings.Contains(raceRes.Body.String(), `<select name="name"`) {
+		t.Fatal("race page should render checkpoint name as a dropdown")
+	}
 }
 
 func TestEachMarathonProjectHasIsolatedParticipants(t *testing.T) {
