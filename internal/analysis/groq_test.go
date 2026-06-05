@@ -91,6 +91,11 @@ func TestAnalyzeRunnerSendsSpecificRunnerDataAndStructuredPrompt(t *testing.T) {
 		},
 		Timeline: []race.CheckpointLog{
 			{
+				Checkpoint:  race.Checkpoint{ID: "start", Name: "Start", Sequence: 1, DistanceKM: 0},
+				Timestamp:   start,
+				VolunteerID: "vol-1",
+			},
+			{
 				Checkpoint:  race.Checkpoint{ID: "cp1", Name: "CP1", Sequence: 2, DistanceKM: 5},
 				Timestamp:   start.Add(25 * time.Minute),
 				VolunteerID: "vol-1",
@@ -119,11 +124,16 @@ func TestAnalyzeRunnerSendsSpecificRunnerDataAndStructuredPrompt(t *testing.T) {
 	if !strings.Contains(captured.Messages[0].Content, "Return only valid JSON") {
 		t.Fatalf("system prompt is not structured: %s", captured.Messages[0].Content)
 	}
+	for _, required := range []string{"checkpoint-to-checkpoint speed", "pace", "performance must be an object", "checkpointInsight must compare each checkpoint segment", "Do not mention hydration", "nutrition"} {
+		if !strings.Contains(captured.Messages[0].Content, required) {
+			t.Fatalf("system prompt missing %q: %s", required, captured.Messages[0].Content)
+		}
+	}
 	if captured.MaxTokens > 360 {
 		t.Fatalf("max tokens = %d, want <= 360", captured.MaxTokens)
 	}
 	userPayload := captured.Messages[1].Content
-	for _, required := range []string{"Mumbai Marathon 2026", "Nawaf", "BIB-007", "CP1", "segmentDurations", "+2m 00s @ CP1"} {
+	for _, required := range []string{"Mumbai Marathon 2026", "Nawaf", "BIB-007", "CP1", "checkpointSpeedSegments", `"distanceKm":5`, `"durationSeconds":1500`, "5:00/km", `"speedKmh":12`, "+2m 00s @ CP1"} {
 		if !strings.Contains(userPayload, required) {
 			t.Fatalf("runner payload missing %q: %s", required, userPayload)
 		}
