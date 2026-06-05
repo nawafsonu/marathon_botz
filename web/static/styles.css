@@ -519,6 +519,42 @@ button:disabled {
   line-height: 1.55;
 }
 
+.analysis-kv-list {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.analysis-kv-list div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.analysis-kv-list dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.analysis-kv-list dd {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.analysis-inline-pair {
+  display: block;
+}
+
+.analysis-inline-pair + .analysis-inline-pair {
+  margin-top: 0.3rem;
+}
+
+.analysis-inline-pair b {
+  color: var(--muted);
+  font-weight: 900;
+}
+
 .analysis-card.wide,
 .analysis-placeholder {
   grid-column: 1 / -1;
@@ -526,6 +562,10 @@ button:disabled {
 
 .analysis-list {
   padding-left: 1.1rem;
+}
+
+.analysis-list.nested {
+  margin-top: 0.3rem;
 }
 
 .analysis-card.risk-low {

@@ -100,38 +100,95 @@ function renderAnalysis(target, analysis) {
   }
   const notes = Array.isArray(parsed.staffNotes) ? parsed.staffNotes.slice(0, 3) : [];
   const noteItems = notes.length
-    ? notes.map((note) => `<li>${escapeHTML(note)}</li>`).join("")
+    ? notes.map((note) => `<li>${renderAnalysisInline(note)}</li>`).join("")
     : `<li>No staff notes returned.</li>`;
+  const riskLevel = analysisPlainText(parsed.riskLevel, "watch").toLowerCase();
+  const riskClass = riskLevel.replace(/[^a-z0-9-]/g, "") || "watch";
   target.innerHTML = `
     <article class="analysis-card wide">
       <span>Summary</span>
-      <strong>${escapeHTML(parsed.summary || "No summary returned.")}</strong>
+      <strong>${escapeHTML(analysisPlainText(parsed.summary, "No summary returned."))}</strong>
     </article>
     <article class="analysis-card">
       <span>Performance</span>
-      <p>${escapeHTML(parsed.performance || "Insufficient segment data.")}</p>
+      ${renderAnalysisValue(parsed.performance, "Insufficient segment data.")}
     </article>
     <article class="analysis-card">
       <span>Checkpoint Insight</span>
-      <p>${escapeHTML(parsed.checkpointInsight || "No checkpoint insight returned.")}</p>
+      ${renderAnalysisValue(parsed.checkpointInsight, "No checkpoint insight returned.")}
     </article>
     <article class="analysis-card">
       <span>Gap Insight</span>
-      <p>${escapeHTML(parsed.gapInsight || "No gap insight returned.")}</p>
+      ${renderAnalysisValue(parsed.gapInsight, "No gap insight returned.")}
     </article>
-    <article class="analysis-card risk-${escapeHTML(String(parsed.riskLevel || "watch").toLowerCase())}">
+    <article class="analysis-card risk-${escapeHTML(riskClass)}">
       <span>Risk</span>
-      <strong>${escapeHTML(parsed.riskLevel || "watch")}</strong>
+      <strong>${escapeHTML(riskLevel)}</strong>
     </article>
     <article class="analysis-card wide">
       <span>Next Action</span>
-      <strong>${escapeHTML(parsed.nextAction || "Keep monitoring the next checkpoint.")}</strong>
+      <strong>${escapeHTML(analysisPlainText(parsed.nextAction, "Keep monitoring the next checkpoint."))}</strong>
     </article>
     <article class="analysis-card wide">
       <span>Staff Notes</span>
       <ul class="analysis-list">${noteItems}</ul>
     </article>
   `;
+}
+
+function renderAnalysisValue(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return `<p>${escapeHTML(fallback)}</p>`;
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return `<p>${escapeHTML(fallback)}</p>`;
+    return `<ul class="analysis-list">${value.map((item) => `<li>${renderAnalysisInline(item)}</li>`).join("")}</ul>`;
+  }
+  if (typeof value === "object") {
+    const rows = Object.entries(value)
+      .filter(([, item]) => item !== undefined && item !== null && item !== "")
+      .map(([key, item]) => `
+        <div>
+          <dt>${escapeHTML(formatAnalysisLabel(key))}</dt>
+          <dd>${renderAnalysisInline(item)}</dd>
+        </div>
+      `)
+      .join("");
+    return rows ? `<dl class="analysis-kv-list">${rows}</dl>` : `<p>${escapeHTML(fallback)}</p>`;
+  }
+  return `<p>${escapeHTML(String(value))}</p>`;
+}
+
+function renderAnalysisInline(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (Array.isArray(value)) {
+    return `<ul class="analysis-list nested">${value.map((item) => `<li>${renderAnalysisInline(item)}</li>`).join("")}</ul>`;
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .filter(([, item]) => item !== undefined && item !== null && item !== "")
+      .map(([key, item]) => `<span class="analysis-inline-pair"><b>${escapeHTML(formatAnalysisLabel(key))}</b> ${renderAnalysisInline(item)}</span>`)
+      .join("");
+  }
+  return escapeHTML(String(value));
+}
+
+function analysisPlainText(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => `${formatAnalysisLabel(key)}: ${analysisPlainText(item, "")}`)
+      .filter(Boolean)
+      .join(" ");
+  }
+  return String(value);
+}
+
+function formatAnalysisLabel(value) {
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function parseAnalysisJSON(value) {

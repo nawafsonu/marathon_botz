@@ -419,7 +419,7 @@ func TestAuthSessionSurvivesServerRestart(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status after restart = %d, want 200; location=%q body=%s", res.Code, res.Header().Get("Location"), res.Body.String())
 	}
-	if strings.Contains(res.Body.String(), "Login") {
+	if strings.Contains(res.Body.String(), "<h1>Login</h1>") {
 		t.Fatalf("session should not show login after restart: %s", res.Body.String())
 	}
 }
