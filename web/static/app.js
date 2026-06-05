@@ -77,11 +77,11 @@ analysisButtons.forEach((button) => {
     const original = button.textContent;
     button.disabled = true;
     button.textContent = "Analyzing...";
-    target.textContent = "Reading checkpoint and leaderboard data...";
+    target.innerHTML = `<div class="analysis-placeholder">Reading checkpoint, segment, gap, and leaderboard data...</div>`;
     target.classList.remove("error");
     try {
       const result = await postJSON(endpoint, {});
-      target.textContent = result.analysis;
+      renderAnalysis(target, result.analysis);
     } catch (error) {
       target.textContent = error.message;
       target.classList.add("error");
@@ -91,6 +91,59 @@ analysisButtons.forEach((button) => {
     }
   });
 });
+
+function renderAnalysis(target, analysis) {
+  const parsed = parseAnalysisJSON(analysis);
+  if (!parsed) {
+    target.innerHTML = `<div class="analysis-card wide"><p>${escapeHTML(analysis)}</p></div>`;
+    return;
+  }
+  const notes = Array.isArray(parsed.staffNotes) ? parsed.staffNotes.slice(0, 3) : [];
+  const noteItems = notes.length
+    ? notes.map((note) => `<li>${escapeHTML(note)}</li>`).join("")
+    : `<li>No staff notes returned.</li>`;
+  target.innerHTML = `
+    <article class="analysis-card wide">
+      <span>Summary</span>
+      <strong>${escapeHTML(parsed.summary || "No summary returned.")}</strong>
+    </article>
+    <article class="analysis-card">
+      <span>Performance</span>
+      <p>${escapeHTML(parsed.performance || "Insufficient segment data.")}</p>
+    </article>
+    <article class="analysis-card">
+      <span>Checkpoint Insight</span>
+      <p>${escapeHTML(parsed.checkpointInsight || "No checkpoint insight returned.")}</p>
+    </article>
+    <article class="analysis-card">
+      <span>Gap Insight</span>
+      <p>${escapeHTML(parsed.gapInsight || "No gap insight returned.")}</p>
+    </article>
+    <article class="analysis-card risk-${escapeHTML(String(parsed.riskLevel || "watch").toLowerCase())}">
+      <span>Risk</span>
+      <strong>${escapeHTML(parsed.riskLevel || "watch")}</strong>
+    </article>
+    <article class="analysis-card wide">
+      <span>Next Action</span>
+      <strong>${escapeHTML(parsed.nextAction || "Keep monitoring the next checkpoint.")}</strong>
+    </article>
+    <article class="analysis-card wide">
+      <span>Staff Notes</span>
+      <ul class="analysis-list">${noteItems}</ul>
+    </article>
+  `;
+}
+
+function parseAnalysisJSON(value) {
+  if (!value) return null;
+  const text = String(value).trim();
+  const unfenced = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    return null;
+  }
+}
 
 registrationForm?.addEventListener("submit", async (event) => {
   event.preventDefault();

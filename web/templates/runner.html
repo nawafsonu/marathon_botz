@@ -51,15 +51,25 @@
       </div>
     </section>
 
-    <section class="panel ai-panel">
+    <section class="panel ai-panel runner-ai-panel">
       <div class="section-heading">
         <div>
-          <h2>Player Analysis</h2>
-          <p>Checkpoint-based performance readout for this runner</p>
+          <h2>Runner AI Analysis</h2>
+          <p>Specific checkpoint, segment, gap, and standing data for this runner</p>
         </div>
         <button type="button" class="secondary-button" data-analysis-endpoint="{{.BasePath}}/api/analysis/runners/{{.Profile.Participant.BibNumber}}" data-analysis-target="runner-analysis-output" {{if not .AIEnabled}}disabled{{end}}>Analyze runner</button>
       </div>
-      <p id="runner-analysis-output" class="analysis-output">{{if .AIEnabled}}Run analysis after checkpoint updates.{{else}}Set GROQ_API_KEY to enable player analysis.{{end}}</p>
+      <div class="analysis-data-grid" aria-label="Runner data used for AI analysis">
+        <div><span>Bib</span><strong>{{.Profile.Participant.BibNumber}}</strong></div>
+        <div><span>Status</span><strong>{{.Profile.Participant.Status}}</strong></div>
+        <div><span>Latest</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></div>
+        <div><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></div>
+        <div><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></div>
+        <div><span>Segments</span><strong>{{len .Profile.Segments}}</strong></div>
+      </div>
+      <div id="runner-analysis-output" class="analysis-output analysis-output-grid" aria-live="polite">
+        <div class="analysis-placeholder">{{if .AIEnabled}}Ready for runner-specific analysis.{{else}}Set GROQ_API_KEY to enable runner analysis.{{end}}</div>
+      </div>
     </section>
 
     <section class="runner-grid">

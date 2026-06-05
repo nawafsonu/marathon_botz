@@ -473,6 +473,73 @@ button:disabled {
   border-color: rgba(154, 255, 89, 0.22);
 }
 
+.runner-ai-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.analysis-data-grid,
+.analysis-output-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.analysis-data-grid div,
+.analysis-card,
+.analysis-placeholder {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(7, 8, 9, 0.38);
+  padding: 0.9rem;
+}
+
+.analysis-data-grid span,
+.analysis-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  margin-bottom: 0.45rem;
+}
+
+.analysis-data-grid strong,
+.analysis-card strong {
+  display: block;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  line-height: 1.2;
+}
+
+.analysis-card p,
+.analysis-card ul {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.analysis-card.wide,
+.analysis-placeholder {
+  grid-column: 1 / -1;
+}
+
+.analysis-list {
+  padding-left: 1.1rem;
+}
+
+.analysis-card.risk-low {
+  border-color: rgba(182, 255, 59, 0.35);
+}
+
+.analysis-card.risk-watch {
+  border-color: rgba(255, 138, 61, 0.45);
+}
+
+.analysis-card.risk-urgent {
+  border-color: rgba(255, 77, 95, 0.55);
+}
+
 .danger-panel {
   border-color: rgba(255, 77, 95, 0.28);
 }
@@ -711,6 +778,11 @@ tbody tr:nth-child(-n + 3) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .analysis-data-grid,
+  .analysis-output-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .hero-metrics,
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -765,6 +837,11 @@ tbody tr:nth-child(-n + 3) {
   }
 
   .certificate-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-data-grid,
+  .analysis-output-grid {
     grid-template-columns: 1fr;
   }
 

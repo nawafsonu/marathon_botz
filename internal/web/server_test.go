@@ -252,6 +252,25 @@ func TestRunnerProfileLinksToCertificate(t *testing.T) {
 	}
 }
 
+func TestRunnerProfileRendersSpecificAIAnalysisPanel(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/runners/BIB-001", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	for _, required := range []string{"Runner AI Analysis", "analysis-data-grid", "/api/analysis/runners/BIB-001", "Latest", "Segments"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("runner profile missing AI panel marker %q: %s", required, body)
+		}
+	}
+}
+
 func TestFinalCSVExportContainsRankedRunners(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)

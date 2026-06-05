@@ -68,44 +68,125 @@ func NewClient(apiKey string, model string, options ...Option) (*Client, error) 
 }
 
 func (c *Client) AnalyzeRace(ctx context.Context, snapshot race.Snapshot) (string, error) {
-	payload := struct {
-		Event        race.Event              `json:"event"`
-		Summary      race.Summary            `json:"summary"`
-		Checkpoints  []race.Checkpoint       `json:"checkpoints"`
-		Leaderboard  []race.LeaderboardEntry `json:"leaderboard"`
-		LiveFeed     []race.CheckpointLog    `json:"liveFeed"`
-		Participants []race.Participant      `json:"participants"`
-	}{
-		Event:        snapshot.Event,
-		Summary:      snapshot.Summary,
-		Checkpoints:  snapshot.Checkpoints,
-		Leaderboard:  firstN(snapshot.Leaderboard, 12),
-		LiveFeed:     firstN(snapshot.LiveFeed, 12),
-		Participants: firstN(snapshot.Participants, 20),
-	}
+	payload := raceAnalysisPayload(snapshot)
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-	return c.complete(ctx, "You are a marathon operations analyst. Give concise, practical race-control insight. Focus on current race health, checkpoint flow, anomalies, and next actions. Avoid medical advice.", string(data))
+	return c.completeWithLimit(ctx, "Marathon ops analyst. Use supplied data only. Be concise. Avoid medical advice.", string(data), 360)
 }
 
 func (c *Client) AnalyzeRunner(ctx context.Context, event race.Event, profile race.RunnerProfile) (string, error) {
-	payload := struct {
-		Event   race.Event         `json:"event"`
-		Profile race.RunnerProfile `json:"profile"`
-	}{
-		Event:   event,
-		Profile: profile,
-	}
+	payload := runnerAnalysisPayload(event, profile)
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-	return c.complete(ctx, "You are a marathon runner performance analyst. Give concise checkpoint-based runner analysis using only the supplied timing data. Mention status, pacing signals, gaps, and what race staff should watch. Avoid medical advice.", string(data))
+	return c.completeWithLimit(ctx, runnerAnalysisSystemPrompt(), string(data), 360)
+}
+
+func raceAnalysisPayload(snapshot race.Snapshot) map[string]any {
+	checkpoints := make([]map[string]any, 0, len(snapshot.Checkpoints))
+	for _, checkpoint := range snapshot.Checkpoints {
+		checkpoints = append(checkpoints, map[string]any{
+			"n":   checkpoint.Name,
+			"seq": checkpoint.Sequence,
+			"km":  checkpoint.DistanceKM,
+		})
+	}
+	leaderboard := make([]map[string]any, 0, len(firstN(snapshot.Leaderboard, 10)))
+	for _, entry := range firstN(snapshot.Leaderboard, 10) {
+		leaderboard = append(leaderboard, map[string]any{
+			"bib":    entry.BibNumber,
+			"name":   entry.RunnerName,
+			"rank":   entry.Rank,
+			"status": entry.Status,
+			"cp":     entry.LatestCheckpoint,
+			"time":   entry.RaceTime,
+			"gap":    entry.Gap,
+		})
+	}
+	feed := make([]map[string]any, 0, len(firstN(snapshot.LiveFeed, 8)))
+	for _, log := range firstN(snapshot.LiveFeed, 8) {
+		feed = append(feed, map[string]any{
+			"bib": log.Participant.BibNumber,
+			"cp":  log.Checkpoint.Name,
+			"ts":  log.Timestamp.Format(time.RFC3339),
+		})
+	}
+	return map[string]any{
+		"event": map[string]any{
+			"name":       snapshot.Event.Name,
+			"distanceKm": snapshot.Event.DistanceKM,
+			"status":     snapshot.Event.Status,
+		},
+		"summary":     snapshot.Summary,
+		"checkpoints": checkpoints,
+		"leaders":     leaderboard,
+		"feed":        feed,
+	}
+}
+
+func runnerAnalysisSystemPrompt() string {
+	return strings.Join([]string{
+		"Runner performance analyst for marathon ops.",
+		"Use supplied runner/timing/checkpoint/segment/gap data only.",
+		"No medical or injury inference.",
+		"Return only valid JSON: summary, performance, checkpointInsight, gapInsight, riskLevel, nextAction, staffNotes.",
+		"riskLevel: low, watch, or urgent. staffNotes: max 3 short notes.",
+	}, " ")
+}
+
+func runnerAnalysisPayload(event race.Event, profile race.RunnerProfile) map[string]any {
+	timelineLogs := lastN(profile.Timeline, 12)
+	timeline := make([]map[string]any, 0, len(timelineLogs))
+	for _, log := range timelineLogs {
+		timeline = append(timeline, map[string]any{
+			"cp":  log.Checkpoint.Name,
+			"seq": log.Checkpoint.Sequence,
+			"km":  log.Checkpoint.DistanceKM,
+			"ts":  log.Timestamp.Format(time.RFC3339),
+		})
+	}
+	segmentRows := lastN(profile.Segments, 10)
+	segments := make([]map[string]any, 0, len(segmentRows))
+	for _, segment := range segmentRows {
+		segments = append(segments, map[string]any{
+			"from": segment.From,
+			"to":   segment.To,
+			"dur":  segment.Duration,
+		})
+	}
+	return map[string]any{
+		"marathon": map[string]any{
+			"name":       event.Name,
+			"location":   event.Location,
+			"distanceKm": event.DistanceKM,
+			"status":     event.Status,
+		},
+		"runner": map[string]any{
+			"name":   profile.Participant.Name,
+			"bib":    profile.Participant.BibNumber,
+			"status": profile.Participant.Status,
+		},
+		"standing": map[string]any{
+			"rank":             profile.Summary.Rank,
+			"latestCheckpoint": profile.Summary.LatestCheckpoint,
+			"latestSequence":   profile.Summary.LatestSequence,
+			"finishTime":       profile.Summary.FinishTime,
+			"raceTime":         profile.Summary.RaceTime,
+			"gap":              profile.Summary.Gap,
+		},
+		"checkpointTimeline": timeline,
+		"segmentDurations":   segments,
+	}
 }
 
 func (c *Client) complete(ctx context.Context, systemPrompt string, userPrompt string) (string, error) {
+	return c.completeWithLimit(ctx, systemPrompt, userPrompt, 450)
+}
+
+func (c *Client) completeWithLimit(ctx context.Context, systemPrompt string, userPrompt string, maxTokens int) (string, error) {
 	requestBody := chatRequest{
 		Model: c.model,
 		Messages: []chatMessage{
@@ -113,7 +194,7 @@ func (c *Client) complete(ctx context.Context, systemPrompt string, userPrompt s
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature: 0.2,
-		MaxTokens:   450,
+		MaxTokens:   maxTokens,
 	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -169,6 +250,13 @@ func firstN[T any](items []T, limit int) []T {
 		return items
 	}
 	return items[:limit]
+}
+
+func lastN[T any](items []T, limit int) []T {
+	if len(items) <= limit {
+		return items
+	}
+	return items[len(items)-limit:]
 }
 
 type chatRequest struct {
