@@ -59,6 +59,15 @@ type sessionRecord struct {
 	ExpiresAt time.Time
 }
 
+type certificateView struct {
+	Event            race.Event
+	Profile          race.RunnerProfile
+	BasePath         string
+	CertificateTitle string
+	IsRanked         bool
+	IssuedAt         time.Time
+}
+
 type projectDeleter interface {
 	Delete(ctx context.Context, id string) error
 }
@@ -154,10 +163,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /logout", s.logout)
 	s.mux.HandleFunc("GET /", s.dashboard)
 	s.mux.HandleFunc("GET /race", s.racePage)
+	s.mux.HandleFunc("GET /certificates", s.bulkCertificates)
 	s.mux.HandleFunc("GET /runners/{bib}", s.runnerProfile)
 	s.mux.HandleFunc("GET /runners/{bib}/certificate", s.runnerCertificate)
 	s.mux.HandleFunc("GET /events/{eventID}", s.dashboard)
 	s.mux.HandleFunc("GET /events/{eventID}/race", s.racePage)
+	s.mux.HandleFunc("GET /events/{eventID}/certificates", s.bulkCertificates)
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}", s.runnerProfile)
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}/certificate", s.runnerCertificate)
 	s.mux.HandleFunc("GET /api/events", s.events)
@@ -296,6 +307,51 @@ func (s *Server) runnerCertificate(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	data := buildCertificateView(service.Event(), s.basePathFor(service.Event().ID), profile, time.Now().UTC())
+	if err := s.templates.ExecuteTemplate(w, "certificate.html", data); err != nil {
+		http.Error(w, "runner certificate could not be rendered", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) bulkCertificates(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	event := service.Event()
+	basePath := s.basePathFor(event.ID)
+	issuedAt := time.Now().UTC()
+	certificates := make([]certificateView, 0)
+	for _, entry := range service.Leaderboard() {
+		if entry.Status != race.RaceStatusFinished {
+			continue
+		}
+		profile, err := service.RunnerProfile(entry.BibNumber)
+		if err != nil {
+			continue
+		}
+		certificates = append(certificates, buildCertificateView(event, basePath, profile, issuedAt))
+	}
+	data := struct {
+		Event        race.Event
+		BasePath     string
+		Certificates []certificateView
+		IssuedAt     time.Time
+	}{
+		Event:        event,
+		BasePath:     basePath,
+		Certificates: certificates,
+		IssuedAt:     issuedAt,
+	}
+	if err := s.templates.ExecuteTemplate(w, "bulk_certificates.html", data); err != nil {
+		http.Error(w, "bulk certificates could not be rendered", http.StatusInternalServerError)
+	}
+}
+
+func buildCertificateView(event race.Event, basePath string, profile race.RunnerProfile, issuedAt time.Time) certificateView {
 	title := "Certificate of Participation"
 	isRanked := false
 	if profile.Participant.Status == race.RaceStatusFinished {
@@ -305,23 +361,13 @@ func (s *Server) runnerCertificate(w http.ResponseWriter, r *http.Request) {
 	if isRanked {
 		title = "Ranked Finisher Certificate"
 	}
-	data := struct {
-		Event            race.Event
-		Profile          race.RunnerProfile
-		BasePath         string
-		CertificateTitle string
-		IsRanked         bool
-		IssuedAt         time.Time
-	}{
-		Event:            service.Event(),
+	return certificateView{
+		Event:            event,
 		Profile:          profile,
-		BasePath:         s.basePathFor(service.Event().ID),
+		BasePath:         basePath,
 		CertificateTitle: title,
 		IsRanked:         isRanked,
-		IssuedAt:         time.Now().UTC(),
-	}
-	if err := s.templates.ExecuteTemplate(w, "certificate.html", data); err != nil {
-		http.Error(w, "runner certificate could not be rendered", http.StatusInternalServerError)
+		IssuedAt:         issuedAt,
 	}
 }
 
