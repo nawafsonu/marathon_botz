@@ -257,6 +257,76 @@ func TestRunnerCertificateDoesNotRankUnfinishedRunner(t *testing.T) {
 	}
 }
 
+func TestBulkCertificatesPagePrintsFinishedRunnersForAdmin(t *testing.T) {
+	manager, err := auth.NewManager(filepath.Join(t.TempDir(), "logincred.txt"))
+	if err != nil {
+		t.Fatalf("auth manager: %v", err)
+	}
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	finishedOne := mustRegisterWeb(t, svc, "First Finisher")
+	finishedTwo := mustRegisterWeb(t, svc, "Second Finisher")
+	active := mustRegisterWeb(t, svc, "Still Running")
+	start := time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)
+	for _, step := range []struct {
+		bib        string
+		checkpoint string
+		offset     time.Duration
+	}{
+		{finishedOne.BibNumber, "start", 0},
+		{finishedOne.BibNumber, "cp1", 20 * time.Minute},
+		{finishedOne.BibNumber, "cp2", 45 * time.Minute},
+		{finishedOne.BibNumber, "finish", 90 * time.Minute},
+		{finishedTwo.BibNumber, "start", 0},
+		{finishedTwo.BibNumber, "cp1", 25 * time.Minute},
+		{finishedTwo.BibNumber, "cp2", 60 * time.Minute},
+		{finishedTwo.BibNumber, "finish", 110 * time.Minute},
+		{active.BibNumber, "start", 0},
+		{active.BibNumber, "cp1", 30 * time.Minute},
+	} {
+		if _, err := svc.RecordCheckpoint(step.bib, step.checkpoint, "vol-1", start.Add(step.offset)); err != nil {
+			t.Fatalf("record %s %s: %v", step.bib, step.checkpoint, err)
+		}
+	}
+	handler := NewServer(svc, WithAuthManager(manager))
+	cookie := loginCookie(t, handler, "admin", "admin2026")
+
+	req := httptest.NewRequest(http.MethodGet, "/certificates", nil)
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	for _, required := range []string{"Bulk Certificate Printing", "Print all certificates", "2 finished runners", "First Finisher", "Second Finisher", "Ranked Finisher Certificate"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("bulk certificates missing %q: %s", required, body)
+		}
+	}
+	if strings.Contains(body, "Still Running") {
+		t.Fatalf("bulk certificates should not include active runner: %s", body)
+	}
+}
+
+func TestBulkCertificatesPageRequiresAdmin(t *testing.T) {
+	manager, err := auth.NewManager(filepath.Join(t.TempDir(), "logincred.txt"))
+	if err != nil {
+		t.Fatalf("auth manager: %v", err)
+	}
+	handler := NewServer(testService(t), WithAuthManager(manager))
+	cookie := loginCookie(t, handler, "volunteer1", "volunteer12026")
+
+	req := httptest.NewRequest(http.MethodGet, "/certificates", nil)
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", res.Code, res.Body.String())
+	}
+}
+
 func TestRunnerProfileLinksToCertificate(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)
