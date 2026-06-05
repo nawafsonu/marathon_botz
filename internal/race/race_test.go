@@ -176,6 +176,52 @@ func TestStartRaceMarksEventActiveAndPersists(t *testing.T) {
 	}
 }
 
+func TestStartRaceRecordsStartCheckpointForRegisteredRunners(t *testing.T) {
+	event := seedEvent()
+	event.Status = EventStatusUpcoming
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+	first, err := svc.RegisterParticipant("First Runner", "+91 90000 10001", "")
+	if err != nil {
+		t.Fatalf("register first: %v", err)
+	}
+	second, err := svc.RegisterParticipant("Second Runner", "+91 90000 10002", "")
+	if err != nil {
+		t.Fatalf("register second: %v", err)
+	}
+
+	if _, err := svc.StartRace(); err != nil {
+		t.Fatalf("start race: %v", err)
+	}
+
+	for _, participant := range []Participant{first, second} {
+		profile, err := svc.RunnerProfile(participant.BibNumber)
+		if err != nil {
+			t.Fatalf("runner profile %s: %v", participant.BibNumber, err)
+		}
+		timeline := profile.Timeline
+		if len(timeline) != 1 {
+			t.Fatalf("%s timeline length = %d, want 1", participant.BibNumber, len(timeline))
+		}
+		if timeline[0].Checkpoint.ID != "start" {
+			t.Fatalf("%s first checkpoint = %s, want start", participant.BibNumber, timeline[0].Checkpoint.ID)
+		}
+		if timeline[0].Timestamp.IsZero() {
+			t.Fatalf("%s start timestamp is zero", participant.BibNumber)
+		}
+	}
+	if _, err := svc.RecordCheckpoint(first.BibNumber, "cp1", "vol-1", time.Now().UTC().Add(time.Minute)); err != nil {
+		t.Fatalf("record cp1 after start race: %v", err)
+	}
+
+	logCount := len(svc.RecentLogs(10))
+	if _, err := svc.StartRace(); err != nil {
+		t.Fatalf("start race again: %v", err)
+	}
+	if got := len(svc.RecentLogs(10)); got != logCount {
+		t.Fatalf("start race was not idempotent; logs = %d, want %d", got, logCount)
+	}
+}
+
 func TestImportParticipantsUsesMappedBibAndNameColumns(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 	rows := []ImportParticipant{

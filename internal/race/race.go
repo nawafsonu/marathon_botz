@@ -266,6 +266,7 @@ func (s *Service) StartRace() (Event, error) {
 		return Event{}, errors.New("completed races cannot be started")
 	}
 	s.event.Status = EventStatusActive
+	s.recordStartCheckpointForRegisteredParticipantsLocked(time.Now().UTC())
 	state := s.stateLocked()
 	store := s.store
 	updated := s.event
@@ -417,6 +418,44 @@ func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, 
 	s.mu.Unlock()
 	persist(store, state)
 	return log, nil
+}
+
+func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.Time) {
+	if len(s.checkpoints) == 0 {
+		return
+	}
+	startCheckpoint := s.checkpoints[0]
+	startAt := at.UTC()
+	if !s.event.StartTime.IsZero() && s.event.StartTime.Before(startAt) {
+		startAt = s.event.StartTime.UTC()
+	}
+
+	recorded := make(map[string]bool, len(s.logs))
+	for _, log := range s.logs {
+		if log.Checkpoint.ID == startCheckpoint.ID {
+			recorded[log.Participant.BibNumber] = true
+		}
+	}
+
+	for i := range s.participants {
+		participant := s.participants[i]
+		if participant.Status == RaceStatusFinished || recorded[participant.BibNumber] {
+			continue
+		}
+		participant.Status = RaceStatusStarted
+		s.participants[i] = participant
+		log := CheckpointLog{
+			ID:          fmt.Sprintf("log-%04d", s.nextLog),
+			EventID:     s.event.ID,
+			Participant: participant,
+			Checkpoint:  startCheckpoint,
+			Timestamp:   startAt,
+			VolunteerID: "race-start",
+		}
+		log.DisplayLabel = fmt.Sprintf("%s reached %s", participant.BibNumber, startCheckpoint.Name)
+		s.logs = append(s.logs, log)
+		s.nextLog++
+	}
 }
 
 func (s *Service) importParticipantLocked(row ImportParticipant) (Participant, error) {

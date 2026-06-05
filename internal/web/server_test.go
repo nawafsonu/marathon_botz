@@ -215,6 +215,65 @@ func TestAuthRedirectsToLoginAndAllowsAdminVolunteerManagement(t *testing.T) {
 	}
 }
 
+func TestVolunteerRacePageHidesAdminSetupControls(t *testing.T) {
+	manager, err := auth.NewManager(filepath.Join(t.TempDir(), "logincred.txt"))
+	if err != nil {
+		t.Fatalf("auth manager: %v", err)
+	}
+	svc := testService(t)
+	handler := NewServer(svc, WithAuthManager(manager))
+	cookie := loginCookie(t, handler, "volunteer1", "volunteer12026")
+
+	req := httptest.NewRequest(http.MethodGet, "/race", nil)
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	for _, forbidden := range []string{"Manage Checkpoints", "start-race-form", "checkpoint-manager-form"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("volunteer race page should not render %q", forbidden)
+		}
+	}
+	for _, required := range []string{"Race Checkpoint Entry", "Add Participant", `name="participantId"`} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("volunteer race page should render %q", required)
+		}
+	}
+}
+
+func TestVolunteerCannotUseAdminRaceControls(t *testing.T) {
+	manager, err := auth.NewManager(filepath.Join(t.TempDir(), "logincred.txt"))
+	if err != nil {
+		t.Fatalf("auth manager: %v", err)
+	}
+	svc := testService(t)
+	handler := NewServer(svc, WithAuthManager(manager))
+	cookie := loginCookie(t, handler, "volunteer1", "volunteer12026")
+
+	for _, item := range []struct {
+		name    string
+		path    string
+		payload string
+	}{
+		{name: "start race", path: "/api/start-race", payload: `{}`},
+		{name: "add checkpoint", path: "/api/checkpoints", payload: `{"name":"CP9","sequence":9,"distanceKm":35}`},
+		{name: "import runners", path: "/api/import-runners", payload: `{}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, item.path, strings.NewReader(item.payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(cookie)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("%s status = %d, want 403; body: %s", item.name, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestImportParticipantsEndpointUsesMappedColumns(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
 	handler := NewServer(svc)
@@ -458,4 +517,21 @@ func testCheckpoints() []race.Checkpoint {
 		{ID: "cp2", Name: "CP2", Sequence: 3, DistanceKM: 10},
 		{ID: "finish", Name: "Finish", Sequence: 4, DistanceKM: 42},
 	}
+}
+
+func loginCookie(t *testing.T, handler http.Handler, username string, password string) *http.Cookie {
+	t.Helper()
+	form := url.Values{"username": {username}, "password": {password}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusSeeOther {
+		t.Fatalf("login status=%d, want 303; body: %s", res.Code, res.Body.String())
+	}
+	cookies := res.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login did not set a cookie")
+	}
+	return cookies[0]
 }

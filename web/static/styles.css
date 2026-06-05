@@ -50,17 +50,6 @@ select {
   max-width: 100%;
 }
 
-.login-shell {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 1.5rem;
-}
-
-.login-panel {
-  width: min(100%, 28rem);
-}
-
 .rail {
   border-right: 1px solid var(--line);
   background: rgba(7, 8, 9, 0.9);

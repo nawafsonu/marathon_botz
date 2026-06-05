@@ -203,12 +203,14 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 		BasePath    string
 		User        auth.User
 		AuthEnabled bool
+		CanManage   bool
 	}{
 		Snapshot:    service.Snapshot(),
 		Projects:    s.projectSummaries(service.Event().ID),
 		BasePath:    s.basePathFor(service.Event().ID),
 		User:        s.currentUser(r),
 		AuthEnabled: s.authManager != nil,
+		CanManage:   s.canManage(r),
 	}
 	if err := s.templates.ExecuteTemplate(w, "race.html", data); err != nil {
 		http.Error(w, "race page could not be rendered", http.StatusInternalServerError)
@@ -450,6 +452,9 @@ func (s *Server) updateEventSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) startRace(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	service, ok := s.serviceForRequest(w, r)
 	if !ok {
 		return
@@ -463,6 +468,9 @@ func (s *Server) startRace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) importRunners(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	service, ok := s.serviceForRequest(w, r)
 	if !ok {
 		return

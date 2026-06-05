@@ -89,7 +89,8 @@ startRaceForm?.addEventListener("submit", async (event) => {
   try {
     const eventData = await postJSON(`${basePath}/api/start-race`, {});
     updateEvent(eventData);
-    setStatus(startRaceStatus, `${eventData.name} is active.`, "success");
+    await refreshState();
+    setStatus(startRaceStatus, `${eventData.name} is active. Start checkpoint recorded.`, "success");
   } catch (error) {
     setStatus(startRaceStatus, error.message, "error");
   }

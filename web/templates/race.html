@@ -17,6 +17,12 @@
         <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}#leaderboard">Leaderboard</a>
         <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
       </nav>
+      {{if .AuthEnabled}}
+        <form method="post" action="/logout" class="logout-form">
+          <span>{{.User.Username}} - {{.User.Role}}</span>
+          <button type="submit">Logout</button>
+        </form>
+      {{end}}
     </aside>
 
     <main class="workspace race-workspace">
@@ -32,6 +38,7 @@
         </div>
       </header>
 
+      {{if .CanManage}}
       <section class="start-race-panel" aria-label="Start race">
         <div>
           <strong data-event-status>{{.Snapshot.Event.Status}}</strong>
@@ -42,6 +49,7 @@
           <p class="form-status" id="start-race-status" role="status"></p>
         </form>
       </section>
+      {{end}}
 
       <section class="race-ops-grid" aria-label="Race operations">
         <section class="panel race-selector-panel">
@@ -64,7 +72,7 @@
         <section class="panel registration-panel race-registration-panel">
           <div class="section-heading">
             <div>
-              <h2>Add Person</h2>
+              <h2>Add Participant</h2>
               <p>Register runner into {{.Snapshot.Event.Name}}</p>
             </div>
           </div>
@@ -125,6 +133,7 @@
           </form>
         </section>
 
+        {{if .CanManage}}
         <section class="panel checkpoint-manager-panel">
           <div class="section-heading">
             <div>
@@ -169,6 +178,7 @@
             {{end}}
           </ol>
         </section>
+        {{end}}
 
         <section class="panel feed-panel">
           <div class="section-heading">

@@ -181,7 +181,9 @@
             <p class="form-status" id="registration-status" role="status"></p>
           </form>
         </section>
+        {{end}}
 
+        {{if and .Projects .CanManage}}
         <section class="panel import-panel">
           <div class="section-heading">
             <div>
