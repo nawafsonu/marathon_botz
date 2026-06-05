@@ -540,20 +540,15 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return
 	}
-	bibNumber := input.BibNumber
-	if strings.TrimSpace(bibNumber) == "" && strings.TrimSpace(input.ParticipantID) != "" {
-		var found bool
-		for _, participant := range service.Participants() {
-			if participant.ID == strings.TrimSpace(input.ParticipantID) {
-				bibNumber = participant.BibNumber
-				found = true
-				break
-			}
-		}
+	bibNumber := strings.TrimSpace(input.BibNumber)
+	participantID := strings.TrimSpace(input.ParticipantID)
+	if participantID != "" {
+		participant, found := participantByID(service.Participants(), participantID)
 		if !found {
-			writeProblem(w, http.StatusNotFound, race.ErrInvalidBib.Error())
+			writeProblem(w, http.StatusNotFound, "selected runner was not found")
 			return
 		}
+		bibNumber = participant.BibNumber
 	}
 	log, err := service.RecordCheckpoint(bibNumber, input.CheckpointID, input.VolunteerID, time.Now().UTC())
 	if err != nil {
@@ -561,6 +556,15 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, log)
+}
+
+func participantByID(participants []race.Participant, id string) (race.Participant, bool) {
+	for _, participant := range participants {
+		if participant.ID == id {
+			return participant, true
+		}
+	}
+	return race.Participant{}, false
 }
 
 func (s *Server) finalCSV(w http.ResponseWriter, r *http.Request) {

@@ -43,9 +43,12 @@ checkpointForm?.addEventListener("submit", async (event) => {
   const payload = {
     checkpointId: form.get("checkpointId"),
     participantId: form.get("participantId"),
-    bibNumber: String(form.get("bibNumber") || "").toUpperCase(),
     volunteerId: form.get("volunteerId"),
   };
+  const bibNumber = String(form.get("bibNumber") || "").trim().toUpperCase();
+  if (!payload.participantId && bibNumber) {
+    payload.bibNumber = bibNumber;
+  }
   setStatus(checkpointStatus, "Recording checkpoint...");
   try {
     const log = await postJSON(`${basePath}/api/checkpoint-logs`, payload);

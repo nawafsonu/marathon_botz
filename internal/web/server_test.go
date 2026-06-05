@@ -110,6 +110,36 @@ func TestCheckpointEndpointAcceptsParticipantIDWithoutBib(t *testing.T) {
 	}
 }
 
+func TestCheckpointEndpointPrefersSelectedRunnerOverBibFallback(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	selected, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "")
+	if err != nil {
+		t.Fatalf("register selected participant: %v", err)
+	}
+	other, err := svc.RegisterParticipant("Arjun Nair", "+91 99999 22222", "")
+	if err != nil {
+		t.Fatalf("register other participant: %v", err)
+	}
+	handler := NewServer(svc)
+
+	payload := []byte(`{"participantId":"` + selected.ID + `","bibNumber":"` + other.BibNumber + `","checkpointId":"start","volunteerId":"vol-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/checkpoint-logs", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", res.Code, res.Body.String())
+	}
+	var log race.CheckpointLog
+	if err := json.NewDecoder(res.Body).Decode(&log); err != nil {
+		t.Fatalf("decode log: %v", err)
+	}
+	if log.Participant.BibNumber != selected.BibNumber {
+		t.Fatalf("logged bib = %s, want selected runner %s", log.Participant.BibNumber, selected.BibNumber)
+	}
+}
+
 func TestFinalCSVExportContainsRankedRunners(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)
