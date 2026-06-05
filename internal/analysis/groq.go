@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -131,9 +132,14 @@ func runnerAnalysisSystemPrompt() string {
 	return strings.Join([]string{
 		"Runner performance analyst for marathon ops.",
 		"Use supplied runner/timing/checkpoint/segment/gap data only.",
-		"No medical or injury inference.",
+		"Analyze checkpoint-to-checkpoint speed and pace using checkpointSpeedSegments first.",
+		"Call out fastest, slowest, and abnormal checkpoint segments with segment names.",
+		"performance must be an object with checkpointSpeedSummary, fastestSegment, slowestSegment, and segmentPaceNotes.",
+		"checkpointInsight must compare each checkpoint segment by pace/speed, not generic runner advice.",
+		"Do not mention hydration, nutrition, injury, medical, training, recovery, or health advice.",
+		"nextAction must be operational: verify checkpoint timestamp, device clock, duplicate scan, or course segment data.",
 		"Return only valid JSON: summary, performance, checkpointInsight, gapInsight, riskLevel, nextAction, staffNotes.",
-		"riskLevel: low, watch, or urgent. staffNotes: max 3 short notes.",
+		"performance should summarize segment speed/pace, not coaching. riskLevel: low, watch, or urgent. staffNotes: max 3 short timing notes.",
 	}, " ")
 }
 
@@ -157,6 +163,7 @@ func runnerAnalysisPayload(event race.Event, profile race.RunnerProfile) map[str
 			"dur":  segment.Duration,
 		})
 	}
+	speedSegments := checkpointSpeedSegments(timelineLogs, 10)
 	return map[string]any{
 		"marathon": map[string]any{
 			"name":       event.Name,
@@ -177,9 +184,71 @@ func runnerAnalysisPayload(event race.Event, profile race.RunnerProfile) map[str
 			"raceTime":         profile.Summary.RaceTime,
 			"gap":              profile.Summary.Gap,
 		},
-		"checkpointTimeline": timeline,
-		"segmentDurations":   segments,
+		"checkpointTimeline":       timeline,
+		"segmentDurations":         segments,
+		"checkpointSpeedSegments":  speedSegments,
+		"analysisInstructionFocus": "checkpoint-to-checkpoint speed, pace, ranking gap, and timing anomalies only",
 	}
+}
+
+func checkpointSpeedSegments(timeline []race.CheckpointLog, limit int) []map[string]any {
+	if len(timeline) < 2 {
+		return nil
+	}
+	segments := make([]map[string]any, 0, len(timeline)-1)
+	for i := 1; i < len(timeline); i++ {
+		from := timeline[i-1]
+		to := timeline[i]
+		distanceKM := to.Checkpoint.DistanceKM - from.Checkpoint.DistanceKM
+		duration := to.Timestamp.Sub(from.Timestamp)
+		durationSeconds := int(duration.Round(time.Second).Seconds())
+		segment := map[string]any{
+			"from":            from.Checkpoint.Name,
+			"to":              to.Checkpoint.Name,
+			"distanceKm":      roundFloat(distanceKM, 2),
+			"durationSeconds": durationSeconds,
+			"duration":        formatAnalysisDuration(duration),
+		}
+		if distanceKM > 0 && durationSeconds > 0 {
+			paceSeconds := int(math.Round(float64(durationSeconds) / distanceKM))
+			segment["paceSecPerKm"] = paceSeconds
+			segment["pace"] = formatAnalysisPace(paceSeconds)
+			segment["speedKmh"] = roundFloat(distanceKM/duration.Hours(), 1)
+		} else {
+			segment["pace"] = "unavailable"
+			segment["speedKmh"] = 0
+		}
+		segments = append(segments, segment)
+	}
+	return lastN(segments, limit)
+}
+
+func formatAnalysisDuration(duration time.Duration) string {
+	if duration < 0 {
+		duration = -duration
+	}
+	totalSeconds := int(duration.Round(time.Second).Seconds())
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh %02dm %02ds", hours, minutes, seconds)
+	}
+	return fmt.Sprintf("%dm %02ds", minutes, seconds)
+}
+
+func formatAnalysisPace(secondsPerKM int) string {
+	if secondsPerKM < 0 {
+		secondsPerKM = -secondsPerKM
+	}
+	minutes := secondsPerKM / 60
+	seconds := secondsPerKM % 60
+	return fmt.Sprintf("%d:%02d/km", minutes, seconds)
+}
+
+func roundFloat(value float64, places int) float64 {
+	scale := math.Pow10(places)
+	return math.Round(value*scale) / scale
 }
 
 func (c *Client) complete(ctx context.Context, systemPrompt string, userPrompt string) (string, error) {

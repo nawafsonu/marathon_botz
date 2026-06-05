@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bulk Certificates - Marathon Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="certificate-body bulk-certificate-body">
+  <main class="certificate-page bulk-certificate-page">
+    <nav class="certificate-actions bulk-certificate-actions" aria-label="Bulk certificate actions">
+      <a class="back-link" href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Back to dashboard</a>
+      <button type="button" class="secondary-button" onclick="window.print()" {{if not .Certificates}}disabled{{end}}>Print all certificates</button>
+    </nav>
+
+    <section class="bulk-certificate-summary">
+      <div>
+        <p class="certificate-kicker">Admin print queue</p>
+        <h1>Bulk Certificate Printing</h1>
+        <p>{{.Event.Name}} - {{.Event.Location}}</p>
+      </div>
+      <strong>{{len .Certificates}} finished runners</strong>
+    </section>
+
+    {{if .Certificates}}
+      <div class="bulk-certificate-stack" aria-label="Certificates ready for printing">
+        {{range .Certificates}}
+          <section class="bulk-certificate-item" aria-label="{{.Profile.Participant.Name}} certificate">
+            {{template "certificate_sheet" .}}
+          </section>
+        {{end}}
+      </div>
+    {{else}}
+      <section class="panel bulk-certificate-empty">
+        <div class="section-heading">
+          <div>
+            <h2>No finished runners yet</h2>
+            <p>Certificates are available after runners reach the finish checkpoint.</p>
+          </div>
+        </div>
+        <a class="secondary-button link-button" href="{{.BasePath}}/race">Go to race control</a>
+      </section>
+    {{end}}
+  </main>
+</body>
+</html>

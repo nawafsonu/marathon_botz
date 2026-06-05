@@ -15,6 +15,7 @@
         <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
         <a class="active" href="{{.BasePath}}/race">Race</a>
         <a href="#leaderboard">Leaderboard</a>
+        {{if .CanManage}}<a href="{{.BasePath}}/certificates">Certificates</a>{{end}}
         <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
       </nav>
       {{if .AuthEnabled}}
