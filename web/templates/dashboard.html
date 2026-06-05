@@ -89,6 +89,7 @@
               <li>
                 <a href="{{if .Active}}/{{else}}/events/{{.ID}}{{end}}"><strong>{{.Name}}</strong></a>
                 <span>{{if .Active}}Active{{else}}{{.Location}}{{end}}</span>
+                <button type="button" class="inline-danger" data-delete-event="{{.ID}}">Delete</button>
               </li>
             {{end}}
           </ol>
@@ -290,7 +291,7 @@
             <h2>Leaderboard</h2>
             <p>Formula timing style ranking, refreshed every 5 seconds</p>
           </div>
-          <span class="completion-rate"><span data-stat="completion">{{.Snapshot.Summary.CompletionRate}}</span>% complete</span>
+          <span class="completion-rate"><span data-stat="completion">{{.Snapshot.Summary.CourseProgress}}</span>% course progress</span>
         </div>
         <div class="table-wrap">
           <table>

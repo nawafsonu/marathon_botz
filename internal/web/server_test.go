@@ -2,8 +2,10 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -110,7 +112,7 @@ func TestCheckpointEndpointAcceptsParticipantIDWithoutBib(t *testing.T) {
 	}
 }
 
-func TestCheckpointEndpointPrefersSelectedRunnerOverBibFallback(t *testing.T) {
+func TestCheckpointEndpointPrefersTypedBibOverSelectedRunner(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
 	selected, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "")
 	if err != nil {
@@ -122,7 +124,7 @@ func TestCheckpointEndpointPrefersSelectedRunnerOverBibFallback(t *testing.T) {
 	}
 	handler := NewServer(svc)
 
-	payload := []byte(`{"participantId":"` + selected.ID + `","bibNumber":"` + other.BibNumber + `","checkpointId":"start","volunteerId":"vol-1"}`)
+	payload := []byte(`{"participantId":"` + selected.ID + `","bibNumber":"002","checkpointId":"start","volunteerId":"vol-1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/checkpoint-logs", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -135,8 +137,8 @@ func TestCheckpointEndpointPrefersSelectedRunnerOverBibFallback(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&log); err != nil {
 		t.Fatalf("decode log: %v", err)
 	}
-	if log.Participant.BibNumber != selected.BibNumber {
-		t.Fatalf("logged bib = %s, want selected runner %s", log.Participant.BibNumber, selected.BibNumber)
+	if log.Participant.BibNumber != other.BibNumber {
+		t.Fatalf("logged bib = %s, want typed chest number %s", log.Participant.BibNumber, other.BibNumber)
 	}
 }
 
@@ -153,6 +155,50 @@ func TestRaceAnalysisRequiresConfiguredGroqClient(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), "Groq analysis is not configured") {
 		t.Fatalf("body did not explain missing Groq config: %s", res.Body.String())
+	}
+}
+
+func TestDeleteParticipantEndpointRemovesRunnerProfile(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/participants/BIB-001/delete", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	if _, err := svc.RunnerProfile("BIB-001"); !errors.Is(err, race.ErrInvalidBib) {
+		t.Fatalf("runner profile error = %v, want ErrInvalidBib", err)
+	}
+	for _, log := range svc.RecentLogs(20) {
+		if log.Participant.BibNumber == "BIB-001" {
+			t.Fatalf("deleted runner log remains: %+v", log)
+		}
+	}
+}
+
+func TestDeleteMarathonEndpointRemovesProjectFromStoreAndRegistry(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	store := &memoryProjectStore{}
+	handler := NewServer(svc, WithProjectStore(store))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/event-1/delete", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != "event-1" {
+		t.Fatalf("deleted ids = %+v, want event-1", store.deleted)
+	}
+	stateReq := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	stateRes := httptest.NewRecorder()
+	handler.ServeHTTP(stateRes, stateReq)
+	if stateRes.Code != http.StatusNotFound {
+		t.Fatalf("state status = %d, want 404 after deleting only marathon", stateRes.Code)
 	}
 }
 
@@ -409,11 +455,14 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	if !strings.Contains(raceRes.Body.String(), `Start Race`) {
 		t.Fatal("race page should render a start race button")
 	}
+	if !strings.Contains(raceRes.Body.String(), `id="leaderboard"`) || !strings.Contains(raceRes.Body.String(), `id="leaderboard-body"`) {
+		t.Fatal("race page should render the live leaderboard")
+	}
 }
 
 func TestRacePageCanSwitchRaceAndRegisterRunner(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
-	handler := NewServer(svc)
+	handler := NewServer(svc, WithProjectStore(&memoryProjectStore{}))
 
 	payload := []byte(`{"name":"Mumbai Marathon 2026","location":"Mumbai","distanceKm":21,"startTime":"2026-02-01T05:30:00Z"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
@@ -444,7 +493,7 @@ func TestRacePageCanSwitchRaceAndRegisterRunner(t *testing.T) {
 
 func TestDashboardFastRegistrationCanSelectRace(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
-	handler := NewServer(svc)
+	handler := NewServer(svc, WithProjectStore(&memoryProjectStore{}))
 
 	payload := []byte(`{"name":"Mumbai Marathon 2026","location":"Mumbai","distanceKm":21,"startTime":"2026-02-01T05:30:00Z"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
@@ -472,7 +521,7 @@ func TestDashboardFastRegistrationCanSelectRace(t *testing.T) {
 
 func TestEachMarathonProjectHasIsolatedParticipants(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
-	handler := NewServer(svc)
+	handler := NewServer(svc, WithProjectStore(&memoryProjectStore{}))
 
 	payload := []byte(`{"name":"Mumbai Marathon 2026","location":"Mumbai","distanceKm":21,"startTime":"2026-02-01T05:30:00Z"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
@@ -563,6 +612,28 @@ func testCheckpoints() []race.Checkpoint {
 		{ID: "cp2", Name: "CP2", Sequence: 3, DistanceKM: 10},
 		{ID: "finish", Name: "Finish", Sequence: 4, DistanceKM: 42},
 	}
+}
+
+type memoryProjectStore struct {
+	states  []race.State
+	deleted []string
+}
+
+func (s *memoryProjectStore) Load(_ context.Context) (race.State, bool, error) {
+	if len(s.states) == 0 {
+		return race.State{}, false, nil
+	}
+	return s.states[len(s.states)-1], true, nil
+}
+
+func (s *memoryProjectStore) Save(_ context.Context, state race.State) error {
+	s.states = append(s.states, state)
+	return nil
+}
+
+func (s *memoryProjectStore) Delete(_ context.Context, id string) error {
+	s.deleted = append(s.deleted, id)
+	return nil
 }
 
 func loginCookie(t *testing.T, handler http.Handler, username string, password string) *http.Cookie {

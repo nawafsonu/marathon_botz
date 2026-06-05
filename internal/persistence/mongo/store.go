@@ -103,6 +103,11 @@ func (s *Store) Save(ctx context.Context, state race.State) error {
 	return err
 }
 
+func (s *Store) Delete(ctx context.Context, id string) error {
+	_, err := s.collection.DeleteOne(ctx, bson.M{"_id": id})
+	return err
+}
+
 func (s *Store) Disconnect(ctx context.Context) error {
 	if s == nil || s.client == nil {
 		return nil

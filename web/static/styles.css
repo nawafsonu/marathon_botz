@@ -467,6 +467,10 @@ button:disabled {
   border-color: rgba(154, 255, 89, 0.22);
 }
 
+.danger-panel {
+  border-color: rgba(255, 77, 95, 0.28);
+}
+
 .analysis-output {
   margin: 0;
   color: var(--text);

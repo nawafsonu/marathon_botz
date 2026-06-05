@@ -52,6 +52,10 @@ type projectSummary struct {
 	RaceURL      string `json:"raceUrl"`
 }
 
+type projectDeleter interface {
+	Delete(ctx context.Context, id string) error
+}
+
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Option func(*Server)
@@ -140,6 +144,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}", s.runnerProfile)
 	s.mux.HandleFunc("GET /api/events", s.events)
 	s.mux.HandleFunc("POST /api/events", s.createEvent)
+	s.mux.HandleFunc("POST /api/events/{eventID}/delete", s.deleteEvent)
 	s.mux.HandleFunc("POST /api/volunteers", s.createVolunteer)
 	s.mux.HandleFunc("POST /api/volunteers/{username}/delete", s.deleteVolunteer)
 	s.mux.HandleFunc("GET /api/state", s.state)
@@ -152,6 +157,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoints", s.addCheckpoint)
 	s.mux.HandleFunc("POST /api/participants", s.registerParticipant)
 	s.mux.HandleFunc("POST /events/{eventID}/api/participants", s.registerParticipant)
+	s.mux.HandleFunc("POST /api/participants/{bib}/delete", s.deleteParticipant)
+	s.mux.HandleFunc("POST /events/{eventID}/api/participants/{bib}/delete", s.deleteParticipant)
 	s.mux.HandleFunc("POST /api/import-runners", s.importRunners)
 	s.mux.HandleFunc("POST /events/{eventID}/api/import-runners", s.importRunners)
 	s.mux.HandleFunc("POST /api/checkpoint-logs", s.recordCheckpoint)
@@ -248,11 +255,13 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 		Profile   race.RunnerProfile
 		BasePath  string
 		AIEnabled bool
+		CanManage bool
 	}{
 		Event:     service.Event(),
 		Profile:   profile,
 		BasePath:  s.basePathFor(service.Event().ID),
 		AIEnabled: s.analyzer != nil,
+		CanManage: s.canManage(r),
 	}
 	if err := s.templates.ExecuteTemplate(w, "runner.html", data); err != nil {
 		http.Error(w, "runner profile could not be rendered", http.StatusInternalServerError)
@@ -359,17 +368,49 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 		Status:      race.EventStatusUpcoming,
 	}
 	service := race.NewService(event, defaultCheckpoints(input.DistanceKM), nil, 10*time.Minute)
-	if s.projectStore != nil {
-		if err := service.UseStore(s.projectStore); err != nil {
-			writeProblem(w, http.StatusInternalServerError, "marathon project could not be saved")
-			return
-		}
+	if s.projectStore == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "MongoDB persistence is required before creating a marathon")
+		return
+	}
+	if err := service.UseStore(s.projectStore); err != nil {
+		writeProblem(w, http.StatusInternalServerError, "marathon project could not be saved")
+		return
 	}
 	if err := s.addProject(id, service); err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, event)
+}
+
+func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	eventID := strings.TrimSpace(r.PathValue("eventID"))
+	if eventID == "" {
+		writeProblem(w, http.StatusBadRequest, "marathon id is required")
+		return
+	}
+	deleter, ok := s.projectStore.(projectDeleter)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "MongoDB persistence is required before deleting a marathon")
+		return
+	}
+	if !s.hasProject(eventID) {
+		http.NotFound(w, r)
+		return
+	}
+	if err := deleter.Delete(r.Context(), eventID); err != nil {
+		writeProblem(w, http.StatusInternalServerError, "marathon project could not be deleted")
+		return
+	}
+	redirect, ok := s.removeProject(eventID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "redirect": redirect})
 }
 
 func (s *Server) createVolunteer(w http.ResponseWriter, r *http.Request) {
@@ -439,6 +480,21 @@ func (s *Server) registerParticipant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, participant)
+}
+
+func (s *Server) deleteParticipant(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	if err := service.DeleteParticipant(r.PathValue("bib")); err != nil {
+		writeProblem(w, statusForRaceError(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "redirect": s.basePathFor(service.Event().ID)})
 }
 
 func (s *Server) updateEventSettings(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +617,7 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	bibNumber := strings.TrimSpace(input.BibNumber)
 	participantID := strings.TrimSpace(input.ParticipantID)
-	if participantID != "" {
+	if bibNumber == "" && participantID != "" {
 		participant, found := participantByID(service.Participants(), participantID)
 		if !found {
 			writeProblem(w, http.StatusNotFound, "selected runner was not found")
@@ -732,6 +788,43 @@ func (s *Server) addProject(id string, service *race.Service) error {
 	return nil
 }
 
+func (s *Server) hasProject(id string) bool {
+	s.projects.mu.RLock()
+	defer s.projects.mu.RUnlock()
+	_, ok := s.projects.services[id]
+	return ok
+}
+
+func (s *Server) removeProject(id string) (string, bool) {
+	s.projects.mu.Lock()
+	defer s.projects.mu.Unlock()
+	if _, exists := s.projects.services[id]; !exists {
+		return "", false
+	}
+	delete(s.projects.services, id)
+	for i, existingID := range s.projects.ids {
+		if existingID == id {
+			s.projects.ids = append(s.projects.ids[:i], s.projects.ids[i+1:]...)
+			break
+		}
+	}
+	if s.projects.activeID != id {
+		return s.dashboardURLLocked(), true
+	}
+	s.projects.activeID = ""
+	s.service = nil
+	if len(s.projects.ids) > 0 {
+		nextID := s.projects.ids[0]
+		s.projects.activeID = nextID
+		s.service = s.projects.services[nextID]
+	}
+	return s.dashboardURLLocked(), true
+}
+
+func (s *Server) dashboardURLLocked() string {
+	return "/"
+}
+
 func (s *Server) projectSummaries(activeID string) []projectSummary {
 	s.projects.mu.RLock()
 	defer s.projects.mu.RUnlock()
@@ -758,6 +851,12 @@ func (s *Server) projectSummaries(activeID string) []projectSummary {
 }
 
 func (s *Server) basePathFor(eventID string) string {
+	s.projects.mu.RLock()
+	defer s.projects.mu.RUnlock()
+	return s.basePathForLocked(eventID)
+}
+
+func (s *Server) basePathForLocked(eventID string) string {
 	if eventID == s.projects.activeID {
 		return ""
 	}

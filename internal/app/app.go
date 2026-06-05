@@ -42,7 +42,7 @@ func buildServer() (*web.Server, func()) {
 	}
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
-		return web.NewServer(nil, web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() {}
+		log.Fatal("MONGODB_URI is required; refusing to start without MongoDB persistence")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -50,14 +50,12 @@ func buildServer() (*web.Server, func()) {
 
 	store, err := mongostore.Connect(ctx, uri, env("MONGODB_DATABASE", databaseFromURI(uri, "marathon_tracker")))
 	if err != nil {
-		log.Printf("MongoDB persistence unavailable; using empty in-memory state: %v", err)
-		return web.NewServer(nil, web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() {}
+		log.Fatalf("MongoDB persistence unavailable; refusing to start in memory: %v", err)
 	}
 
 	states, err := store.LoadAll(ctx)
 	if err != nil {
-		log.Printf("MongoDB state load failed; using empty in-memory state: %v", err)
-		return web.NewServer(nil, web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() { _ = store.Disconnect(context.Background()) }
+		log.Fatalf("MongoDB state load failed; refusing to start in memory: %v", err)
 	}
 
 	if len(states) == 0 {
@@ -173,7 +171,7 @@ func loadDotEnv(path string) {
 		if !ok {
 			continue
 		}
-		key = strings.TrimSpace(key)
+		key = strings.TrimPrefix(strings.TrimSpace(key), "\ufeff")
 		value = strings.Trim(strings.TrimSpace(value), `"'`)
 		if key == "" || os.Getenv(key) != "" {
 			continue

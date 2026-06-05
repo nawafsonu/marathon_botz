@@ -47,7 +47,7 @@ checkpointForm?.addEventListener("submit", async (event) => {
     volunteerId: form.get("volunteerId"),
   };
   const bibNumber = String(form.get("bibNumber") || "").trim().toUpperCase();
-  if (!payload.participantId && bibNumber) {
+  if (bibNumber) {
     payload.bibNumber = bibNumber;
   }
   setStatus(checkpointStatus, "Recording checkpoint...");
@@ -192,6 +192,51 @@ document.querySelectorAll("[data-delete-volunteer]").forEach((button) => {
   });
 });
 
+document.querySelectorAll("[data-delete-event]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const eventId = button.dataset.deleteEvent;
+    if (!eventId || !window.confirm("Delete this marathon and all runner data?")) return;
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Deleting...";
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(eventId)}/delete`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "Marathon could not be deleted.");
+      }
+      window.location.href = body.redirect || "/";
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      setStatus(eventCreateStatus, error.message, "error");
+    }
+  });
+});
+
+document.querySelectorAll("[data-delete-runner]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const bibNumber = button.dataset.deleteRunner;
+    const endpoint = button.dataset.deleteRunnerEndpoint;
+    if (!endpoint || !window.confirm(`Delete runner ${bibNumber} and all checkpoint entries?`)) return;
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Deleting...";
+    try {
+      const response = await fetch(endpoint, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "Runner could not be deleted.");
+      }
+      window.location.href = body.redirect || "/";
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      alert(error.message);
+    }
+  });
+});
+
 checkpointManagerForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(checkpointManagerForm);
@@ -254,14 +299,25 @@ function updateEvent(eventData) {
   const startNode = document.querySelector("[data-event-start]");
   if (startNode) {
     startNode.dataset.eventStart = eventData.startTime;
-    startNode.textContent = new Date(eventData.startTime).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    startNode.textContent = formatTime(eventData.startTime);
   }
   const statusNode = document.querySelector("[data-event-status]");
   if (statusNode) statusNode.textContent = eventData.status;
+}
+
+function hydrateDisplayedEventTime() {
+  const startNode = document.querySelector("[data-event-start]");
+  if (startNode?.dataset.eventStart) {
+    startNode.textContent = formatTime(startNode.dataset.eventStart);
+  }
+}
+
+function formatTime(iso) {
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function updateStats(summary) {
@@ -270,7 +326,7 @@ function updateStats(summary) {
     finished: summary.finished,
     active: summary.active,
     dnf: summary.dnf,
-    completion: summary.completionRate,
+    completion: summary.courseProgress ?? summary.completionRate,
   };
   for (const [key, value] of Object.entries(pairs)) {
     const node = document.querySelector(`[data-stat='${key}']`);
@@ -381,4 +437,5 @@ function escapeHTML(value) {
 }
 
 hydrateEventSettings();
+hydrateDisplayedEventTime();
 setInterval(refreshState, 5000);

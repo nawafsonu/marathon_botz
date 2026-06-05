@@ -2,6 +2,7 @@ package race
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -109,6 +110,9 @@ func TestSummaryCountsRaceStatuses(t *testing.T) {
 	if summary.CompletionRate != 33 {
 		t.Fatalf("completion rate = %d, want 33", summary.CompletionRate)
 	}
+	if summary.CourseProgress != 41 {
+		t.Fatalf("course progress = %d, want 41", summary.CourseProgress)
+	}
 }
 
 func TestServicePersistsStateAfterMutation(t *testing.T) {
@@ -154,25 +158,34 @@ func TestUpdateEventSettingsChangesDistanceAndStartTime(t *testing.T) {
 func TestStartRaceMarksEventActiveAndPersists(t *testing.T) {
 	event := seedEvent()
 	event.Status = EventStatusUpcoming
+	event.StartTime = time.Date(2026, 1, 10, 1, 0, 0, 0, time.UTC)
 	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
 	store := &recordingStore{}
 	if err := svc.UseStore(store); err != nil {
 		t.Fatalf("use store: %v", err)
 	}
 
+	before := time.Now().UTC()
 	updated, err := svc.StartRace()
 	if err != nil {
 		t.Fatalf("start race: %v", err)
 	}
+	after := time.Now().UTC()
 
 	if updated.Status != EventStatusActive {
 		t.Fatalf("status = %s, want %s", updated.Status, EventStatusActive)
+	}
+	if updated.StartTime.Before(before) || updated.StartTime.After(after) {
+		t.Fatalf("start time = %s, want actual click time between %s and %s", updated.StartTime, before, after)
 	}
 	if svc.Event().Status != EventStatusActive {
 		t.Fatalf("service status = %s, want %s", svc.Event().Status, EventStatusActive)
 	}
 	if store.last.Event.Status != EventStatusActive {
 		t.Fatalf("persisted status = %s, want %s", store.last.Event.Status, EventStatusActive)
+	}
+	if !store.last.Event.StartTime.Equal(updated.StartTime) {
+		t.Fatalf("persisted start time = %s, want %s", store.last.Event.StartTime, updated.StartTime)
 	}
 }
 
@@ -222,6 +235,34 @@ func TestStartRaceRecordsStartCheckpointForRegisteredRunners(t *testing.T) {
 	}
 }
 
+func TestDeleteParticipantRemovesProfileAndLogs(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+	store := &recordingStore{}
+	if err := svc.UseStore(store); err != nil {
+		t.Fatalf("use store: %v", err)
+	}
+	participant := mustRegister(t, svc, "Delete Runner")
+	mustRegister(t, svc, "Keep Runner")
+	mustLog(t, svc, participant.BibNumber, "start", time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC))
+
+	if err := svc.DeleteParticipant("001"); err != nil {
+		t.Fatalf("delete participant: %v", err)
+	}
+
+	if _, err := svc.RunnerProfile(participant.BibNumber); !errors.Is(err, ErrInvalidBib) {
+		t.Fatalf("runner profile error = %v, want ErrInvalidBib", err)
+	}
+	if len(svc.Participants()) != 1 {
+		t.Fatalf("participants length = %d, want 1", len(svc.Participants()))
+	}
+	if len(svc.RecentLogs(10)) != 0 {
+		t.Fatalf("logs length = %d, want 0", len(svc.RecentLogs(10)))
+	}
+	if len(store.last.Participants) != 1 || len(store.last.Logs) != 0 {
+		t.Fatalf("persisted state = %+v", store.last)
+	}
+}
+
 func TestImportParticipantsUsesMappedBibAndNameColumns(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 	rows := []ImportParticipant{
@@ -264,6 +305,17 @@ func TestAddCheckpointInsertsCheckpointBySequence(t *testing.T) {
 	}
 	if checkpoints[3].Name != "CP2" || checkpoints[3].Sequence != 4 {
 		t.Fatalf("later checkpoints were not shifted: %+v", checkpoints)
+	}
+}
+
+func TestAddCheckpointCannotPrecedeStart(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+
+	if _, err := svc.AddCheckpoint("Pre Start", 1, 0); err == nil {
+		t.Fatal("checkpoint before Start was accepted")
+	}
+	if got := svc.Checkpoints()[0].ID; got != "start" {
+		t.Fatalf("first checkpoint = %s, want start", got)
 	}
 }
 

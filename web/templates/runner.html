@@ -22,6 +22,18 @@
       </div>
     </section>
 
+    {{if .CanManage}}
+    <section class="panel danger-panel">
+      <div class="section-heading">
+        <div>
+          <h2>Runner Profile</h2>
+          <p>Remove this runner and all checkpoint entries from this marathon</p>
+        </div>
+        <button type="button" class="inline-danger" data-delete-runner="{{.Profile.Participant.BibNumber}}" data-delete-runner-endpoint="{{.BasePath}}/api/participants/{{.Profile.Participant.BibNumber}}/delete">Delete runner</button>
+      </div>
+    </section>
+    {{end}}
+
     <section class="metric-grid runner-metrics">
       <article class="metric-card"><span>Race Status</span><strong>{{.Profile.Participant.Status}}</strong></article>
       <article class="metric-card success"><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></article>

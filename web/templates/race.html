@@ -14,7 +14,7 @@
       <nav>
         <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
         <a class="active" href="{{.BasePath}}/race">Race</a>
-        <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}#leaderboard">Leaderboard</a>
+        <a href="#leaderboard">Leaderboard</a>
         <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
       </nav>
       {{if .AuthEnabled}}
@@ -115,7 +115,7 @@
             </label>
             <label>
               Runner
-              <select name="participantId" required>
+              <select name="participantId">
                 {{range .Snapshot.Participants}}
                   <option value="{{.ID}}">{{.BibNumber}} · {{.Name}}</option>
                 {{else}}
@@ -124,8 +124,8 @@
               </select>
             </label>
             <label>
-              Chest number fallback
-              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="Optional BIB-001 or 001">
+              Chest number
+              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="BIB-001 or 001">
             </label>
             <input type="hidden" name="volunteerId" value="volunteer-tablet-1">
             <button type="submit">Submit</button>
@@ -162,7 +162,7 @@
               </label>
               <label>
                 Sequence
-                <input name="sequence" type="number" min="1" step="1" placeholder="5" required>
+                <input name="sequence" type="number" min="2" step="1" placeholder="5" required>
               </label>
               <label>
                 Distance marker
@@ -195,6 +195,46 @@
             {{end}}
           </ol>
         </section>
+      </section>
+
+      <section id="leaderboard" class="panel leaderboard-panel">
+        <div class="section-heading">
+          <div>
+            <h2>Leaderboard</h2>
+            <p>Live race positions for the selected marathon</p>
+          </div>
+          <span class="completion-rate"><span data-stat="completion">{{.Snapshot.Summary.CourseProgress}}</span>% course progress</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Bib</th>
+                <th>Runner</th>
+                <th>Status</th>
+                <th>Latest Checkpoint</th>
+                <th>Finish Time</th>
+                <th>Gap</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body">
+              {{range .Snapshot.Leaderboard}}
+                <tr>
+                  <td class="rank">#{{.Rank}}</td>
+                  <td>{{.BibNumber}}</td>
+                  <td><a href="{{$.BasePath}}/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
+                  <td>{{.Status}}</td>
+                  <td>{{.LatestCheckpoint}}</td>
+                  <td>{{.FinishTime}}</td>
+                  <td>{{.Gap}}</td>
+                </tr>
+              {{else}}
+                <tr><td colspan="7" class="empty-state">No runners are registered yet.</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>

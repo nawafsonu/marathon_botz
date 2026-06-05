@@ -99,6 +99,7 @@ type Summary struct {
 	DNF               int    `json:"dnf"`
 	Registered        int    `json:"registered"`
 	CompletionRate    int    `json:"completionRate"`
+	CourseProgress    int    `json:"courseProgress"`
 	AverageFinishTime string `json:"averageFinishTime"`
 }
 
@@ -260,13 +261,19 @@ func (s *Service) UpdateEventSettings(distanceKM int, startTime time.Time) (Even
 }
 
 func (s *Service) StartRace() (Event, error) {
+	startedAt := time.Now().UTC()
 	s.mu.Lock()
 	if s.event.Status == EventStatusCompleted {
 		s.mu.Unlock()
 		return Event{}, errors.New("completed races cannot be started")
 	}
+	if s.event.Status == EventStatusActive && !s.event.StartTime.IsZero() {
+		startedAt = s.event.StartTime.UTC()
+	} else {
+		s.event.StartTime = startedAt
+	}
 	s.event.Status = EventStatusActive
-	s.recordStartCheckpointForRegisteredParticipantsLocked(time.Now().UTC())
+	s.recordStartCheckpointForRegisteredParticipantsLocked(startedAt)
 	state := s.stateLocked()
 	store := s.store
 	updated := s.event
@@ -288,6 +295,10 @@ func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (
 	}
 
 	s.mu.Lock()
+	if len(s.checkpoints) > 0 && sequence <= s.firstCheckpointSequence() {
+		s.mu.Unlock()
+		return Checkpoint{}, errors.New("custom checkpoints must be after Start")
+	}
 	id := checkpointID(name)
 	if id == "" {
 		s.mu.Unlock()
@@ -347,6 +358,37 @@ func (s *Service) RegisterParticipant(name, phone, notes string) (Participant, e
 	return participant, nil
 }
 
+func (s *Service) DeleteParticipant(bibNumber string) error {
+	bibNumber = normalizeBib(bibNumber)
+	if bibNumber == "" {
+		return ErrInvalidBib
+	}
+
+	s.mu.Lock()
+	participantIndex, ok := s.participantByBib[bibNumber]
+	if !ok {
+		s.mu.Unlock()
+		return ErrInvalidBib
+	}
+	s.participants = append(s.participants[:participantIndex], s.participants[participantIndex+1:]...)
+	s.participantByBib = make(map[string]int, len(s.participants))
+	for i, participant := range s.participants {
+		s.participantByBib[participant.BibNumber] = i
+	}
+	filteredLogs := s.logs[:0]
+	for _, log := range s.logs {
+		if log.Participant.BibNumber != bibNumber {
+			filteredLogs = append(filteredLogs, log)
+		}
+	}
+	s.logs = filteredLogs
+	state := s.stateLocked()
+	store := s.store
+	s.mu.Unlock()
+	persist(store, state)
+	return nil
+}
+
 func (s *Service) ImportParticipants(rows []ImportParticipant) ImportResult {
 	result := ImportResult{}
 	s.mu.Lock()
@@ -367,7 +409,7 @@ func (s *Service) ImportParticipants(rows []ImportParticipant) ImportResult {
 }
 
 func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, at time.Time) (CheckpointLog, error) {
-	bibNumber = strings.ToUpper(strings.TrimSpace(bibNumber))
+	bibNumber = normalizeBib(bibNumber)
 	checkpointID = strings.TrimSpace(checkpointID)
 	volunteerID = strings.TrimSpace(volunteerID)
 	if at.IsZero() {
@@ -421,14 +463,11 @@ func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, 
 }
 
 func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.Time) {
-	if len(s.checkpoints) == 0 {
+	startCheckpoint, ok := s.startCheckpointLocked()
+	if !ok {
 		return
 	}
-	startCheckpoint := s.checkpoints[0]
 	startAt := at.UTC()
-	if !s.event.StartTime.IsZero() && s.event.StartTime.Before(startAt) {
-		startAt = s.event.StartTime.UTC()
-	}
 
 	recorded := make(map[string]bool, len(s.logs))
 	for _, log := range s.logs {
@@ -617,6 +656,7 @@ func (s *Service) summaryLocked() Summary {
 	if len(s.participants) > 0 {
 		completionRate = int(math.Floor((float64(finished) / float64(len(s.participants))) * 100))
 	}
+	courseProgress := s.courseProgressLocked()
 
 	average := "—"
 	if finishDurations > 0 {
@@ -630,8 +670,38 @@ func (s *Service) summaryLocked() Summary {
 		DNF:               dnf,
 		Registered:        registered,
 		CompletionRate:    completionRate,
+		CourseProgress:    courseProgress,
 		AverageFinishTime: average,
 	}
+}
+
+func (s *Service) courseProgressLocked() int {
+	if len(s.participants) == 0 || len(s.checkpoints) == 0 {
+		return 0
+	}
+	firstSequence := s.firstCheckpointSequence()
+	finishSequence := s.checkpoints[len(s.checkpoints)-1].Sequence
+	totalSteps := finishSequence - firstSequence + 1
+	if totalSteps <= 0 {
+		return 0
+	}
+	var progress float64
+	for _, participant := range s.participants {
+		logs := s.logsForBibLocked(participant.BibNumber)
+		if len(logs) == 0 {
+			continue
+		}
+		latestSequence := logs[len(logs)-1].Checkpoint.Sequence
+		completedSteps := latestSequence - firstSequence + 1
+		if completedSteps < 0 {
+			completedSteps = 0
+		}
+		if completedSteps > totalSteps {
+			completedSteps = totalSteps
+		}
+		progress += float64(completedSteps) / float64(totalSteps)
+	}
+	return int(math.Floor((progress / float64(len(s.participants))) * 100))
 }
 
 func (s *Service) leaderboardLocked() []LeaderboardEntry {
@@ -794,10 +864,21 @@ func (s *Service) raceDurationLocked(bibNumber string) (time.Duration, bool) {
 }
 
 func (s *Service) firstCheckpointSequence() int {
-	if len(s.checkpoints) == 0 {
+	checkpoint, ok := s.startCheckpointLocked()
+	if !ok {
 		return 1
 	}
-	return s.checkpoints[0].Sequence
+	return checkpoint.Sequence
+}
+
+func (s *Service) startCheckpointLocked() (Checkpoint, bool) {
+	if checkpoint, ok := s.checkpointByID["start"]; ok {
+		return checkpoint, true
+	}
+	if len(s.checkpoints) == 0 {
+		return Checkpoint{}, false
+	}
+	return s.checkpoints[0], true
 }
 
 func bibNumber(bib string) int {
