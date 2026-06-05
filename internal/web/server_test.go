@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"marathon/internal/auth"
+	"marathon/internal/chestreader"
 	"marathon/internal/race"
 )
 
@@ -155,6 +156,117 @@ func TestRaceAnalysisRequiresConfiguredGroqClient(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), "Groq analysis is not configured") {
 		t.Fatalf("body did not explain missing Groq config: %s", res.Body.String())
+	}
+}
+
+func TestChestReaderScanDisabledReturnsSafeError(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+	body, contentType := chestReaderUpload(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chest-reader/scan", body)
+	req.Header.Set("Content-Type", contentType)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "Chest reader is not configured") {
+		t.Fatalf("body did not explain disabled scanner: %s", res.Body.String())
+	}
+}
+
+func TestChestReaderScanAutoSubmitsOnlyRegisteredHighConfidenceBib(t *testing.T) {
+	svc := testService(t)
+	reader := testChestReaderClient(t, `{"text":"001","normalizedBib":"BIB-001","confidence":0.91,"candidates":[{"bibNumber":"BIB-001","confidence":0.91}],"boxes":[]}`)
+	handler := NewServer(svc, WithChestReader(reader))
+	body, contentType := chestReaderUpload(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chest-reader/scan", body)
+	req.Header.Set("Content-Type", contentType)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	var result struct {
+		AutoSubmit    bool   `json:"autoSubmit"`
+		BibNumber     string `json:"bibNumber"`
+		ParticipantID string `json:"participantId"`
+		RunnerName    string `json:"runnerName"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !result.AutoSubmit || result.BibNumber != "BIB-001" || result.ParticipantID == "" || result.RunnerName == "" {
+		t.Fatalf("unexpected scan result: %+v", result)
+	}
+}
+
+func TestChestReaderScanUnknownBibDoesNotAutoSubmit(t *testing.T) {
+	svc := testService(t)
+	reader := testChestReaderClient(t, `{"text":"404","normalizedBib":"BIB-404","confidence":0.95,"candidates":[{"bibNumber":"BIB-404","confidence":0.95}],"boxes":[]}`)
+	handler := NewServer(svc, WithChestReader(reader))
+	body, contentType := chestReaderUpload(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chest-reader/scan", body)
+	req.Header.Set("Content-Type", contentType)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	var result struct {
+		AutoSubmit bool `json:"autoSubmit"`
+		Candidates []struct {
+			BibNumber  string `json:"bibNumber"`
+			Registered bool   `json:"registered"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.AutoSubmit {
+		t.Fatalf("unknown bib auto-submitted: %+v", result)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].BibNumber != "BIB-404" || result.Candidates[0].Registered {
+		t.Fatalf("unexpected candidates: %+v", result.Candidates)
+	}
+}
+
+func TestChestReaderScanLowConfidenceRegisteredBibRequiresCandidateChoice(t *testing.T) {
+	svc := testService(t)
+	reader := testChestReaderClient(t, `{"text":"001","normalizedBib":"BIB-001","confidence":0.42,"candidates":[{"bibNumber":"BIB-001","confidence":0.42}],"boxes":[]}`)
+	handler := NewServer(svc, WithChestReader(reader))
+	body, contentType := chestReaderUpload(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chest-reader/scan", body)
+	req.Header.Set("Content-Type", contentType)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	var result struct {
+		AutoSubmit bool `json:"autoSubmit"`
+		Candidates []struct {
+			BibNumber  string  `json:"bibNumber"`
+			Confidence float64 `json:"confidence"`
+			Registered bool    `json:"registered"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.AutoSubmit {
+		t.Fatalf("low confidence bib auto-submitted: %+v", result)
+	}
+	if len(result.Candidates) != 1 || !result.Candidates[0].Registered || result.Candidates[0].Confidence != 0.42 {
+		t.Fatalf("unexpected candidates: %+v", result.Candidates)
 	}
 }
 
@@ -633,6 +745,9 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	if !strings.Contains(raceRes.Body.String(), `name="participantId"`) {
 		t.Fatal("race page should render a runner selector for checkpoint entry")
 	}
+	if !strings.Contains(raceRes.Body.String(), `id="chest-reader-start"`) {
+		t.Fatal("race page should render the chest reader scan button")
+	}
 	if !strings.Contains(raceRes.Body.String(), `<select name="name"`) {
 		t.Fatal("race page should render checkpoint name as a dropdown")
 	}
@@ -808,6 +923,43 @@ func mustRegisterWeb(t *testing.T, svc *race.Service, name string) race.Particip
 		t.Fatalf("register %s: %v", name, err)
 	}
 	return participant
+}
+
+func testChestReaderClient(t *testing.T, response string) *chestreader.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("authorization header = %q", got)
+		}
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			t.Fatalf("content type = %q", r.Header.Get("Content-Type"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(server.Close)
+	reader, err := chestreader.New(server.URL, "test-token", 0.82)
+	if err != nil {
+		t.Fatalf("new chest reader: %v", err)
+	}
+	return reader
+}
+
+func chestReaderUpload(t *testing.T) (*bytes.Buffer, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", "frame.jpg")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("fake-image")); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	return &body, writer.FormDataContentType()
 }
 
 type memoryProjectStore struct {

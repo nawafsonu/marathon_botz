@@ -11,6 +11,7 @@ Go-powered Marathon Tracker MVP for race organizers and checkpoint volunteers.
 - Excel/CSV runner import with explicit column mapping for bib number, name, phone, and notes.
 - Tablet-friendly checkpoint entry with server-time logging.
 - Ordered checkpoint validation and duplicate prevention.
+- Optional camera chest-number reader powered by a Python YOLO/OCR service.
 - Live leaderboard and newest-first race feed.
 - Runner profile with checkpoint timeline and segment performance.
 - CSV final-results export.
@@ -42,6 +43,32 @@ Set a different port with:
 ```powershell
 $env:PORT='8090'; go run ./cmd/marathon
 ```
+
+## Camera Chest Reader
+
+The checkpoint race page can scan chest numbers with the device camera when `CHEST_READER_URL` is configured. The Go app proxies camera frames to a Python OCR service, validates the result against registered runners, then uses the existing checkpoint endpoint to record the entry.
+
+Run the Python service locally from the separate OCR repo:
+
+```powershell
+git clone https://github.com/nawafsonu/ocr.git
+cd ocr
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:PORT='8096'
+uvicorn app.main:app --host 0.0.0.0 --port 8096
+```
+
+Local Go `.env` values:
+
+```text
+CHEST_READER_URL=http://127.0.0.1:8096/read
+CHEST_READER_TOKEN=
+CHEST_READER_MIN_CONFIDENCE=0.82
+```
+
+YOLO is used to crop the person/chest area; OCR reads the text. For production accuracy, replace the generic YOLO model with a race-specific bib detector trained from labeled event photos.
 
 ## MongoDB Persistence
 
@@ -93,12 +120,12 @@ Production deployment should harden:
 
 ## Deployment Notes
 
-This repo includes `render.yaml` for Render Blueprint deployment. It defines one Go web service named `marathon-tracker`.
+This repo includes `render.yaml` for Render Blueprint deployment. It defines the Go web service named `marathon-tracker`. Deploy the Python OCR service from `https://github.com/nawafsonu/ocr` and point `CHEST_READER_URL` at its `/read` endpoint.
 
 - Build command: `go mod download && go build -tags netgo -ldflags '-s -w' -o app ./cmd/marathon`
 - Start command: `./app`
 - Environment: `PORT` is supplied by Render.
-- Secret environment variables: set `MONGODB_URI`; optionally set `MONGODB_DATABASE`.
+- Secret environment variables: set `MONGODB_URI`, `GROQ_API_KEY`, and the same `CHEST_READER_TOKEN` on both Render services.
 
 Recommended pre-deploy validation when the Render CLI is installed:
 

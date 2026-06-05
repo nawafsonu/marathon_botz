@@ -925,6 +925,10 @@ func normalizeBib(value string) string {
 	return fmt.Sprintf("BIB-%03d", n)
 }
 
+func NormalizeBib(value string) string {
+	return normalizeBib(value)
+}
+
 func checkpointID(name string) string {
 	value := strings.ToLower(strings.TrimSpace(name))
 	value = strings.ReplaceAll(value, ".", "")

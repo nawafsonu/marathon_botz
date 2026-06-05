@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"marathon/internal/analysis"
 	"marathon/internal/auth"
+	"marathon/internal/chestreader"
 	mongostore "marathon/internal/persistence/mongo"
 	"marathon/internal/race"
 	"marathon/internal/web"
@@ -40,6 +42,17 @@ func buildServer() (*web.Server, func()) {
 	if err != nil {
 		log.Printf("Groq analysis unavailable: %v", err)
 	}
+	var chestReader *chestreader.Client
+	if strings.TrimSpace(os.Getenv("CHEST_READER_URL")) != "" {
+		chestReader, err = chestreader.New(
+			os.Getenv("CHEST_READER_URL"),
+			os.Getenv("CHEST_READER_TOKEN"),
+			floatEnv("CHEST_READER_MIN_CONFIDENCE", 0.82),
+		)
+		if err != nil {
+			log.Printf("Chest reader unavailable: %v", err)
+		}
+	}
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
 		log.Fatal("MONGODB_URI is required; refusing to start without MongoDB persistence")
@@ -60,7 +73,7 @@ func buildServer() (*web.Server, func()) {
 
 	if len(states) == 0 {
 		log.Printf("No Marathon Tracker projects found; starting empty")
-		return web.NewServer(nil, web.WithProjectStore(store), web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() { _ = store.Disconnect(context.Background()) }
+		return web.NewServer(nil, web.WithProjectStore(store), web.WithAuthManager(authManager), web.WithAnalyzer(analyzer), web.WithChestReader(chestReader)), func() { _ = store.Disconnect(context.Background()) }
 	}
 
 	services := make([]*race.Service, 0, len(states))
@@ -72,7 +85,7 @@ func buildServer() (*web.Server, func()) {
 		services = append(services, service)
 	}
 	log.Printf("Loaded %d Marathon Tracker project(s) from MongoDB", len(services))
-	return web.NewServer(services[0], web.WithProjectStore(store), web.WithProjectServices(services), web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() { _ = store.Disconnect(context.Background()) }
+	return web.NewServer(services[0], web.WithProjectStore(store), web.WithProjectServices(services), web.WithAuthManager(authManager), web.WithAnalyzer(analyzer), web.WithChestReader(chestReader)), func() { _ = store.Disconnect(context.Background()) }
 }
 
 func event() race.Event {
@@ -140,6 +153,18 @@ func env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func floatEnv(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func databaseFromURI(uri string, fallback string) string {

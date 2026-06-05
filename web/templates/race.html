@@ -128,6 +128,23 @@
               Chest number
               <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="BIB-001 or 001">
             </label>
+            <div class="chest-reader" data-chest-reader-enabled="{{.ChestReaderEnabled}}">
+              <div class="chest-reader-header">
+                <div>
+                  <strong>Camera chest reader</strong>
+                  <span>{{if .ChestReaderEnabled}}Auto-submit after two matching reads{{else}}Set CHEST_READER_URL to enable camera scan{{end}}</span>
+                </div>
+                <div class="chest-reader-actions">
+                  <button type="button" class="secondary-button" id="chest-reader-start" {{if not .ChestReaderEnabled}}disabled{{end}}>Scan chest</button>
+                  <button type="button" class="secondary-button muted-button" id="chest-reader-stop" hidden>Stop</button>
+                </div>
+              </div>
+              <div class="chest-reader-preview" hidden>
+                <video id="chest-reader-video" playsinline muted></video>
+                <canvas id="chest-reader-canvas" width="640" height="480" hidden></canvas>
+              </div>
+              <div id="chest-reader-candidates" class="chest-reader-candidates" aria-live="polite"></div>
+            </div>
             <input type="hidden" name="volunteerId" value="volunteer-tablet-1">
             <button type="submit">Submit</button>
             <p class="form-status" id="checkpoint-status" role="status"></p>

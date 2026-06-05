@@ -3,6 +3,9 @@ tmp-*
 .env
 .env.local
 logincred.txt
+*.sessions
+__pycache__/
+*.pyc
 
 # Go build/test artifacts
 bin/

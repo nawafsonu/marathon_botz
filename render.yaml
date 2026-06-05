@@ -17,3 +17,9 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b
+      - key: CHEST_READER_URL
+        value: https://marathon-chest-reader.onrender.com/read
+      - key: CHEST_READER_TOKEN
+        sync: false
+      - key: CHEST_READER_MIN_CONFIDENCE
+        value: "0.82"

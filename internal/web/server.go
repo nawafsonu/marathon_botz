@@ -20,6 +20,7 @@ import (
 
 	"marathon/internal/analysis"
 	"marathon/internal/auth"
+	"marathon/internal/chestreader"
 	"marathon/internal/importer"
 	"marathon/internal/race"
 )
@@ -33,6 +34,7 @@ type Server struct {
 	staticDir    string
 	authManager  *auth.Manager
 	analyzer     *analysis.Client
+	chestReader  *chestreader.Client
 	sessionMu    sync.RWMutex
 	sessionPath  string
 	sessions     map[string]sessionRecord
@@ -129,6 +131,12 @@ func WithAnalyzer(analyzer *analysis.Client) Option {
 	}
 }
 
+func WithChestReader(reader *chestreader.Client) Option {
+	return func(s *Server) {
+		s.chestReader = reader
+	}
+}
+
 func NewServer(service *race.Service, options ...Option) *Server {
 	server := &Server{
 		mux:       http.NewServeMux(),
@@ -190,6 +198,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /events/{eventID}/api/participants/{bib}/delete", s.deleteParticipant)
 	s.mux.HandleFunc("POST /api/import-runners", s.importRunners)
 	s.mux.HandleFunc("POST /events/{eventID}/api/import-runners", s.importRunners)
+	s.mux.HandleFunc("POST /api/chest-reader/scan", s.scanChestNumber)
+	s.mux.HandleFunc("POST /events/{eventID}/api/chest-reader/scan", s.scanChestNumber)
 	s.mux.HandleFunc("POST /api/checkpoint-logs", s.recordCheckpoint)
 	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoint-logs", s.recordCheckpoint)
 	s.mux.HandleFunc("POST /api/analysis/race", s.analyzeRace)
@@ -249,19 +259,21 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := struct {
-		Snapshot    race.Snapshot
-		Projects    []projectSummary
-		BasePath    string
-		User        auth.User
-		AuthEnabled bool
-		CanManage   bool
+		Snapshot           race.Snapshot
+		Projects           []projectSummary
+		BasePath           string
+		User               auth.User
+		AuthEnabled        bool
+		CanManage          bool
+		ChestReaderEnabled bool
 	}{
-		Snapshot:    service.Snapshot(),
-		Projects:    s.projectSummaries(service.Event().ID),
-		BasePath:    s.basePathFor(service.Event().ID),
-		User:        s.currentUser(r),
-		AuthEnabled: s.authManager != nil,
-		CanManage:   s.canManage(r),
+		Snapshot:           service.Snapshot(),
+		Projects:           s.projectSummaries(service.Event().ID),
+		BasePath:           s.basePathFor(service.Event().ID),
+		User:               s.currentUser(r),
+		AuthEnabled:        s.authManager != nil,
+		CanManage:          s.canManage(r),
+		ChestReaderEnabled: s.chestReader != nil,
 	}
 	if err := s.templates.ExecuteTemplate(w, "race.html", data); err != nil {
 		http.Error(w, "race page could not be rendered", http.StatusInternalServerError)
@@ -746,6 +758,80 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, log)
 }
 
+type chestReaderCandidate struct {
+	BibNumber     string  `json:"bibNumber"`
+	Confidence    float64 `json:"confidence"`
+	Text          string  `json:"text,omitempty"`
+	Registered    bool    `json:"registered"`
+	ParticipantID string  `json:"participantId,omitempty"`
+	RunnerName    string  `json:"runnerName,omitempty"`
+}
+
+type chestReaderScanResponse struct {
+	Enabled       bool                   `json:"enabled"`
+	AutoSubmit    bool                   `json:"autoSubmit"`
+	BibNumber     string                 `json:"bibNumber,omitempty"`
+	ParticipantID string                 `json:"participantId,omitempty"`
+	RunnerName    string                 `json:"runnerName,omitempty"`
+	Confidence    float64                `json:"confidence,omitempty"`
+	Candidates    []chestReaderCandidate `json:"candidates"`
+	Message       string                 `json:"message"`
+}
+
+func (s *Server) scanChestNumber(w http.ResponseWriter, r *http.Request) {
+	if s.chestReader == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "Chest reader is not configured.")
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 6<<20)
+	if err := r.ParseMultipartForm(6 << 20); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Image upload is required.")
+		return
+	}
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "Image upload is required.")
+		return
+	}
+	defer file.Close()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	contentType := ""
+	if header != nil {
+		contentType = header.Header.Get("Content-Type")
+	}
+	result, err := s.chestReader.Read(ctx, header.Filename, contentType, file)
+	if err != nil {
+		writeProblem(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	candidates := registeredChestReaderCandidates(result, service.Participants())
+	trusted := trustedChestReaderCandidate(candidates, s.chestReader.MinConfidence())
+	response := chestReaderScanResponse{
+		Enabled:    true,
+		Candidates: candidates,
+		Message:    "No registered runner matched this scan.",
+	}
+	if trusted != nil {
+		response.AutoSubmit = true
+		response.BibNumber = trusted.BibNumber
+		response.ParticipantID = trusted.ParticipantID
+		response.RunnerName = trusted.RunnerName
+		response.Confidence = trusted.Confidence
+		response.Message = trusted.BibNumber + " matched " + trusted.RunnerName + "."
+	} else if len(candidates) > 0 {
+		response.Message = "Select a candidate or type the chest number."
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func participantByID(participants []race.Participant, id string) (race.Participant, bool) {
 	for _, participant := range participants {
 		if participant.ID == id {
@@ -753,6 +839,70 @@ func participantByID(participants []race.Participant, id string) (race.Participa
 		}
 	}
 	return race.Participant{}, false
+}
+
+func registeredChestReaderCandidates(result chestreader.Result, participants []race.Participant) []chestReaderCandidate {
+	participantsByBib := make(map[string]race.Participant, len(participants))
+	for _, participant := range participants {
+		participantsByBib[race.NormalizeBib(participant.BibNumber)] = participant
+	}
+
+	rawCandidates := append([]chestreader.Candidate(nil), result.Candidates...)
+	if result.NormalizedBib != "" {
+		rawCandidates = append(rawCandidates, chestreader.Candidate{
+			BibNumber:  result.NormalizedBib,
+			Confidence: result.Confidence,
+			Text:       result.Text,
+		})
+	}
+
+	merged := make(map[string]chestReaderCandidate, len(rawCandidates))
+	for _, raw := range rawCandidates {
+		bibNumber := race.NormalizeBib(raw.BibNumber)
+		if bibNumber == "" {
+			continue
+		}
+		candidate := chestReaderCandidate{
+			BibNumber:  bibNumber,
+			Confidence: raw.Confidence,
+			Text:       raw.Text,
+		}
+		if participant, ok := participantsByBib[bibNumber]; ok {
+			candidate.Registered = true
+			candidate.ParticipantID = participant.ID
+			candidate.RunnerName = participant.Name
+		}
+		existing, exists := merged[bibNumber]
+		if !exists || candidate.Confidence > existing.Confidence {
+			merged[bibNumber] = candidate
+		}
+	}
+
+	candidates := make([]chestReaderCandidate, 0, len(merged))
+	for _, candidate := range merged {
+		candidates = append(candidates, candidate)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Registered != candidates[j].Registered {
+			return candidates[i].Registered
+		}
+		return candidates[i].Confidence > candidates[j].Confidence
+	})
+	return candidates
+}
+
+func trustedChestReaderCandidate(candidates []chestReaderCandidate, minConfidence float64) *chestReaderCandidate {
+	var trusted *chestReaderCandidate
+	for i := range candidates {
+		if !candidates[i].Registered || candidates[i].Confidence < minConfidence {
+			continue
+		}
+		if trusted != nil {
+			return nil
+		}
+		trusted = &candidates[i]
+	}
+	return trusted
 }
 
 func (s *Server) analyzeRace(w http.ResponseWriter, r *http.Request) {

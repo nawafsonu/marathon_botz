@@ -18,6 +18,19 @@ const checkpointManagerStatus = document.querySelector("#checkpoint-manager-stat
 const startRaceStatus = document.querySelector("#start-race-status");
 const volunteerStatus = document.querySelector("#volunteer-status");
 const analysisButtons = document.querySelectorAll("[data-analysis-endpoint]");
+const chestReaderRoot = document.querySelector(".chest-reader");
+const chestReaderStart = document.querySelector("#chest-reader-start");
+const chestReaderStop = document.querySelector("#chest-reader-stop");
+const chestReaderVideo = document.querySelector("#chest-reader-video");
+const chestReaderCanvas = document.querySelector("#chest-reader-canvas");
+const chestReaderPreview = document.querySelector(".chest-reader-preview");
+const chestReaderCandidates = document.querySelector("#chest-reader-candidates");
+
+let chestReaderStream = null;
+let chestReaderTimer = null;
+let chestReaderBusy = false;
+let chestReaderLastBib = "";
+let chestReaderStableCount = 0;
 
 function setStatus(node, message, kind = "") {
   if (!node) return;
@@ -61,6 +74,146 @@ checkpointForm?.addEventListener("submit", async (event) => {
     setStatus(checkpointStatus, error.message, "error");
   }
 });
+
+chestReaderStart?.addEventListener("click", async () => {
+  if (!checkpointForm || !chestReaderRoot || chestReaderRoot.dataset.chestReaderEnabled !== "true") return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus(checkpointStatus, "Camera access requires HTTPS or localhost.", "error");
+    return;
+  }
+  try {
+    chestReaderStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    chestReaderVideo.srcObject = chestReaderStream;
+    await chestReaderVideo.play();
+    chestReaderPreview.hidden = false;
+    chestReaderStart.hidden = true;
+    chestReaderStop.hidden = false;
+    chestReaderLastBib = "";
+    chestReaderStableCount = 0;
+    setStatus(checkpointStatus, "Scanning chest number...");
+    scanChestFrame();
+    chestReaderTimer = window.setInterval(scanChestFrame, 900);
+  } catch (error) {
+    setStatus(checkpointStatus, `Camera unavailable: ${error.message}`, "error");
+  }
+});
+
+chestReaderStop?.addEventListener("click", () => {
+  stopChestReader();
+  setStatus(checkpointStatus, "Camera scan stopped.");
+});
+
+chestReaderCandidates?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-chest-bib]");
+  if (!button || !checkpointForm) return;
+  const bibNumber = button.dataset.chestBib;
+  const participantId = button.dataset.chestParticipantId;
+  checkpointForm.elements.namedItem("bibNumber").value = bibNumber;
+  if (participantId) {
+    checkpointForm.elements.namedItem("participantId").value = participantId;
+  }
+  stopChestReader();
+  setStatus(checkpointStatus, `Recording ${bibNumber} from camera selection...`);
+  checkpointForm.requestSubmit();
+});
+
+async function scanChestFrame() {
+  if (!chestReaderStream || chestReaderBusy || !chestReaderVideo.videoWidth) return;
+  chestReaderBusy = true;
+  try {
+    const blob = await captureChestFrame();
+    if (!blob) return;
+    const form = new FormData();
+    form.append("image", blob, "frame.jpg");
+    const response = await fetch(`${basePath}/api/chest-reader/scan`, {
+      method: "POST",
+      body: form,
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Camera scan failed.");
+    }
+    handleChestReaderResult(result);
+  } catch (error) {
+    setStatus(checkpointStatus, error.message, "error");
+  } finally {
+    chestReaderBusy = false;
+  }
+}
+
+function captureChestFrame() {
+  const width = chestReaderVideo.videoWidth || 640;
+  const height = chestReaderVideo.videoHeight || 480;
+  chestReaderCanvas.width = width;
+  chestReaderCanvas.height = height;
+  const context = chestReaderCanvas.getContext("2d");
+  context.drawImage(chestReaderVideo, 0, 0, width, height);
+  return new Promise((resolve) => chestReaderCanvas.toBlob(resolve, "image/jpeg", 0.74));
+}
+
+function handleChestReaderResult(result) {
+  renderChestReaderCandidates(result.candidates || []);
+  if (!result.autoSubmit || !result.bibNumber) {
+    chestReaderLastBib = "";
+    chestReaderStableCount = 0;
+    setStatus(checkpointStatus, result.message || "Select a candidate or type the chest number.");
+    return;
+  }
+  if (result.bibNumber === chestReaderLastBib) {
+    chestReaderStableCount += 1;
+  } else {
+    chestReaderLastBib = result.bibNumber;
+    chestReaderStableCount = 1;
+  }
+  if (chestReaderStableCount < 2) {
+    setStatus(checkpointStatus, `Confirming ${result.bibNumber}...`);
+    return;
+  }
+  checkpointForm.elements.namedItem("bibNumber").value = result.bibNumber;
+  if (result.participantId) {
+    checkpointForm.elements.namedItem("participantId").value = result.participantId;
+  }
+  stopChestReader();
+  setStatus(checkpointStatus, `Recording ${result.bibNumber} from camera...`);
+  checkpointForm.requestSubmit();
+}
+
+function renderChestReaderCandidates(candidates) {
+  if (!chestReaderCandidates) return;
+  const registered = candidates.filter((candidate) => candidate.registered);
+  const visible = registered.length ? registered : candidates.slice(0, 3);
+  if (!visible.length) {
+    chestReaderCandidates.innerHTML = "";
+    return;
+  }
+  chestReaderCandidates.innerHTML = visible.map((candidate) => `
+    <button type="button" data-chest-bib="${escapeHTML(candidate.bibNumber)}" data-chest-participant-id="${escapeHTML(candidate.participantId || "")}" ${candidate.registered ? "" : "disabled"}>
+      <strong>${escapeHTML(candidate.bibNumber)}</strong>
+      <span>${candidate.registered ? escapeHTML(candidate.runnerName || "Registered runner") : "Not registered"} · ${Math.round(Number(candidate.confidence || 0) * 100)}%</span>
+    </button>
+  `).join("");
+}
+
+function stopChestReader() {
+  if (chestReaderTimer) {
+    window.clearInterval(chestReaderTimer);
+    chestReaderTimer = null;
+  }
+  if (chestReaderStream) {
+    chestReaderStream.getTracks().forEach((track) => track.stop());
+    chestReaderStream = null;
+  }
+  chestReaderBusy = false;
+  chestReaderLastBib = "";
+  chestReaderStableCount = 0;
+  if (chestReaderVideo) chestReaderVideo.srcObject = null;
+  if (chestReaderPreview) chestReaderPreview.hidden = true;
+  if (chestReaderStart) chestReaderStart.hidden = false;
+  if (chestReaderStop) chestReaderStop.hidden = true;
+}
 
 navigationSelects.forEach((select) => {
   select.addEventListener("change", () => {

@@ -369,6 +369,99 @@ input[name="bibNumber"] {
   text-transform: uppercase;
 }
 
+.chest-reader {
+  display: grid;
+  gap: 0.8rem;
+  border: 1px solid rgba(154, 255, 89, 0.2);
+  border-radius: 8px;
+  background: rgba(7, 8, 9, 0.5);
+  padding: 0.9rem;
+}
+
+.chest-reader-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.chest-reader-header strong,
+.chest-reader-header span {
+  display: block;
+}
+
+.chest-reader-header strong {
+  font-size: 1rem;
+}
+
+.chest-reader-header span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.chest-reader-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chest-reader-actions button {
+  min-height: 3rem;
+  white-space: nowrap;
+}
+
+.muted-button {
+  background: transparent;
+  color: var(--text);
+  border-color: #303741;
+}
+
+.chest-reader-preview {
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid #303741;
+  border-radius: 8px;
+  background: #050607;
+}
+
+.chest-reader-preview video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.chest-reader-candidates {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.chest-reader-candidates button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  min-height: 3.5rem;
+  border: 1px solid rgba(154, 255, 89, 0.28);
+  border-radius: 8px;
+  background: rgba(154, 255, 89, 0.08);
+  color: var(--text);
+  padding: 0 0.9rem;
+  text-align: left;
+}
+
+.chest-reader-candidates button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chest-reader-candidates span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
 input:focus,
 select:focus {
   border-color: var(--orange);
