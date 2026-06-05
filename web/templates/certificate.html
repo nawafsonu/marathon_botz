@@ -13,23 +13,46 @@
       <button type="button" class="secondary-button" onclick="window.print()">Print / save PDF</button>
     </nav>
 
-    <article class="certificate-sheet">
-      <header class="certificate-header">
-        <p>{{.Event.Name}}</p>
-        <h1>{{.CertificateTitle}}</h1>
-        <span>{{.Event.Location}} - {{.Event.Date.Format "02 Jan 2006"}}</span>
+    <article class="certificate-sheet{{if .IsRanked}} is-ranked{{end}}" aria-label="{{.CertificateTitle}}">
+      <div class="certificate-frame">
+        <header class="certificate-header">
+          <div>
+            <p class="certificate-kicker">Official Marathon Tracker Result</p>
+            <h1>{{.CertificateTitle}}</h1>
+            <div class="certificate-event-line">
+              <strong>{{.Event.Name}}</strong>
+              <span>{{.Event.Location}} - {{.Event.Date.Format "02 Jan 2006"}}</span>
+            </div>
+          </div>
+          {{if .IsRanked}}
+            <aside class="rank-seal" aria-label="Overall rank {{.Profile.Summary.Rank}}">
+              <span>Overall Rank</span>
+              <strong>#{{.Profile.Summary.Rank}}</strong>
+              <small>Ranked Certification</small>
+            </aside>
+          {{else}}
+            <aside class="rank-seal status-seal" aria-label="Runner status {{.Profile.Participant.Status}}">
+              <span>Status</span>
+              <strong>{{.Profile.Participant.Status}}</strong>
+              <small>Verified Record</small>
+            </aside>
+          {{end}}
       </header>
 
       <section class="certificate-recipient">
         <p>This certifies that</p>
         <h2>{{.Profile.Participant.Name}}</h2>
-        <span>{{.Profile.Participant.BibNumber}}</span>
-        <p>participated in the {{.Event.DistanceKM}} KM {{.Event.Name}}.</p>
+        <div class="certificate-bib">{{.Profile.Participant.BibNumber}}</div>
+        {{if .IsRanked}}
+          <p>completed the {{.Event.DistanceKM}} KM {{.Event.Name}} with an official ranked finish.</p>
+        {{else}}
+          <p>participated in the {{.Event.DistanceKM}} KM {{.Event.Name}}.</p>
+        {{end}}
       </section>
 
       <section class="certificate-metrics" aria-label="Runner race data">
         <div><span>Status</span><strong>{{.Profile.Participant.Status}}</strong></div>
-        <div><span>Rank</span><strong>#{{.Profile.Summary.Rank}}</strong></div>
+        <div><span>Rank</span><strong>{{if gt .Profile.Summary.Rank 0}}#{{.Profile.Summary.Rank}}{{else}}-{{end}}</strong></div>
         <div><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></div>
         <div><span>Finish Time</span><strong>{{.Profile.Summary.FinishTime}}</strong></div>
         <div><span>Latest Checkpoint</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></div>
@@ -62,6 +85,7 @@
           <strong>{{.Profile.Participant.BibNumber}}</strong>
         </div>
       </footer>
+      </div>
     </article>
   </main>
 </body>

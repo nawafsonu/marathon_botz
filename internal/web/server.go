@@ -281,20 +281,27 @@ func (s *Server) runnerCertificate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	title := "Certificate of Participation"
+	isRanked := false
 	if profile.Participant.Status == race.RaceStatusFinished {
 		title = "Certificate of Completion"
+		isRanked = profile.Summary.Rank > 0
+	}
+	if isRanked {
+		title = "Ranked Finisher Certificate"
 	}
 	data := struct {
 		Event            race.Event
 		Profile          race.RunnerProfile
 		BasePath         string
 		CertificateTitle string
+		IsRanked         bool
 		IssuedAt         time.Time
 	}{
 		Event:            service.Event(),
 		Profile:          profile,
 		BasePath:         s.basePathFor(service.Event().ID),
 		CertificateTitle: title,
+		IsRanked:         isRanked,
 		IssuedAt:         time.Now().UTC(),
 	}
 	if err := s.templates.ExecuteTemplate(w, "certificate.html", data); err != nil {

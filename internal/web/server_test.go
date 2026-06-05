@@ -229,10 +229,31 @@ func TestRunnerCertificatePageIncludesMarathonAndRunnerData(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
 	}
 	body := res.Body.String()
-	for _, required := range []string{"Certificate of Completion", "Kochi Marathon 2026", "Certificate Runner", finished.BibNumber, "Race Time", "1h 35m 00s", "Finish Time"} {
+	for _, required := range []string{"Ranked Finisher Certificate", "Ranked Certification", "Overall Rank", "#1", "official ranked finish", "Kochi Marathon 2026", "Certificate Runner", finished.BibNumber, "Race Time", "1h 35m 00s", "Finish Time"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("certificate missing %q in body: %s", required, body)
 		}
+	}
+}
+
+func TestRunnerCertificateDoesNotRankUnfinishedRunner(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	participant := mustRegisterWeb(t, svc, "Registered Runner")
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/runners/"+participant.BibNumber+"/certificate", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "Certificate of Participation") {
+		t.Fatalf("unfinished runner should receive participation certificate: %s", body)
+	}
+	if strings.Contains(body, "Ranked Certification") {
+		t.Fatalf("unfinished runner should not receive ranked certification: %s", body)
 	}
 }
 
