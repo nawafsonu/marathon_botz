@@ -140,6 +140,22 @@ func TestCheckpointEndpointPrefersSelectedRunnerOverBibFallback(t *testing.T) {
 	}
 }
 
+func TestRaceAnalysisRequiresConfiguredGroqClient(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analysis/race", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "Groq analysis is not configured") {
+		t.Fatalf("body did not explain missing Groq config: %s", res.Body.String())
+	}
+}
+
 func TestFinalCSVExportContainsRankedRunners(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)

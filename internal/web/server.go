@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"marathon/internal/analysis"
 	"marathon/internal/auth"
 	"marathon/internal/importer"
 	"marathon/internal/race"
@@ -29,6 +31,7 @@ type Server struct {
 	templates    *template.Template
 	staticDir    string
 	authManager  *auth.Manager
+	analyzer     *analysis.Client
 	sessionMu    sync.RWMutex
 	sessions     map[string]string
 }
@@ -92,6 +95,12 @@ func WithAuthManager(manager *auth.Manager) Option {
 	}
 }
 
+func WithAnalyzer(analyzer *analysis.Client) Option {
+	return func(s *Server) {
+		s.analyzer = analyzer
+	}
+}
+
 func NewServer(service *race.Service, options ...Option) *Server {
 	server := &Server{
 		mux:       http.NewServeMux(),
@@ -147,6 +156,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /events/{eventID}/api/import-runners", s.importRunners)
 	s.mux.HandleFunc("POST /api/checkpoint-logs", s.recordCheckpoint)
 	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoint-logs", s.recordCheckpoint)
+	s.mux.HandleFunc("POST /api/analysis/race", s.analyzeRace)
+	s.mux.HandleFunc("POST /events/{eventID}/api/analysis/race", s.analyzeRace)
+	s.mux.HandleFunc("POST /api/analysis/runners/{bib}", s.analyzeRunner)
+	s.mux.HandleFunc("POST /events/{eventID}/api/analysis/runners/{bib}", s.analyzeRunner)
 	s.mux.HandleFunc("GET /reports/final.csv", s.finalCSV)
 	s.mux.HandleFunc("GET /events/{eventID}/reports/final.csv", s.finalCSV)
 }
@@ -178,6 +191,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		Volunteers  []auth.User
 		AuthEnabled bool
 		CanManage   bool
+		AIEnabled   bool
 	}{
 		Snapshot:    snapshot,
 		Projects:    s.projectSummaries(activeID),
@@ -186,6 +200,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		Volunteers:  s.volunteers(),
 		AuthEnabled: s.authManager != nil,
 		CanManage:   s.canManage(r),
+		AIEnabled:   s.analyzer != nil,
 	}
 	if err := s.templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
 		http.Error(w, "dashboard could not be rendered", http.StatusInternalServerError)
@@ -231,9 +246,13 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Event   race.Event
 		Profile race.RunnerProfile
+		BasePath string
+		AIEnabled bool
 	}{
-		Event:   service.Event(),
-		Profile: profile,
+		Event:     service.Event(),
+		Profile:   profile,
+		BasePath:  s.basePathFor(service.Event().ID),
+		AIEnabled: s.analyzer != nil,
 	}
 	if err := s.templates.ExecuteTemplate(w, "runner.html", data); err != nil {
 		http.Error(w, "runner profile could not be rendered", http.StatusInternalServerError)
@@ -565,6 +584,49 @@ func participantByID(participants []race.Participant, id string) (race.Participa
 		}
 	}
 	return race.Participant{}, false
+}
+
+func (s *Server) analyzeRace(w http.ResponseWriter, r *http.Request) {
+	if s.analyzer == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "Groq analysis is not configured")
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	text, err := s.analyzer.AnalyzeRace(ctx, service.Snapshot())
+	if err != nil {
+		writeProblem(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"analysis": text})
+}
+
+func (s *Server) analyzeRunner(w http.ResponseWriter, r *http.Request) {
+	if s.analyzer == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "Groq analysis is not configured")
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	profile, err := service.RunnerProfile(r.PathValue("bib"))
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, race.ErrInvalidBib.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	text, err := s.analyzer.AnalyzeRunner(ctx, service.Event(), profile)
+	if err != nil {
+		writeProblem(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"analysis": text})
 }
 
 func (s *Server) finalCSV(w http.ResponseWriter, r *http.Request) {

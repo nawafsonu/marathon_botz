@@ -273,6 +273,17 @@
       </section>
 
       {{if .Projects}}
+      <section class="panel ai-panel">
+        <div class="section-heading">
+          <div>
+            <h2>Marathon Analysis</h2>
+            <p>AI race-control summary from live checkpoints and leaderboard data</p>
+          </div>
+          <button type="button" class="secondary-button" data-analysis-endpoint="{{.BasePath}}/api/analysis/race" data-analysis-target="race-analysis-output" {{if not .AIEnabled}}disabled{{end}}>Analyze race</button>
+        </div>
+        <p id="race-analysis-output" class="analysis-output">{{if .AIEnabled}}Run analysis when race data changes.{{else}}Set GROQ_API_KEY to enable marathon analysis.{{end}}</p>
+      </section>
+
       <section id="leaderboard" class="panel leaderboard-panel">
         <div class="section-heading">
           <div>

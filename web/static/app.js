@@ -17,6 +17,7 @@ const importStatus = document.querySelector("#import-status");
 const checkpointManagerStatus = document.querySelector("#checkpoint-manager-status");
 const startRaceStatus = document.querySelector("#start-race-status");
 const volunteerStatus = document.querySelector("#volunteer-status");
+const analysisButtons = document.querySelectorAll("[data-analysis-endpoint]");
 
 function setStatus(node, message, kind = "") {
   if (!node) return;
@@ -65,6 +66,29 @@ navigationSelects.forEach((select) => {
   select.addEventListener("change", () => {
     const nextURL = select.value;
     if (nextURL) window.location.href = nextURL;
+  });
+});
+
+analysisButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const endpoint = button.dataset.analysisEndpoint;
+    const target = document.getElementById(button.dataset.analysisTarget);
+    if (!endpoint || !target) return;
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Analyzing...";
+    target.textContent = "Reading checkpoint and leaderboard data...";
+    target.classList.remove("error");
+    try {
+      const result = await postJSON(endpoint, {});
+      target.textContent = result.analysis;
+    } catch (error) {
+      target.textContent = error.message;
+      target.classList.add("error");
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
   });
 });
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"marathon/internal/analysis"
 	"marathon/internal/auth"
 	mongostore "marathon/internal/persistence/mongo"
 	"marathon/internal/race"
@@ -35,9 +36,13 @@ func buildServer() (*web.Server, func()) {
 	if err != nil {
 		log.Printf("Local login credentials unavailable; auth disabled: %v", err)
 	}
+	analyzer, err := analysis.NewClient(os.Getenv("GROQ_API_KEY"), env("GROQ_MODEL", "openai/gpt-oss-120b"))
+	if err != nil {
+		log.Printf("Groq analysis unavailable: %v", err)
+	}
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
-		return web.NewServer(nil, web.WithAuthManager(authManager)), func() {}
+		return web.NewServer(nil, web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() {}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -46,18 +51,18 @@ func buildServer() (*web.Server, func()) {
 	store, err := mongostore.Connect(ctx, uri, env("MONGODB_DATABASE", databaseFromURI(uri, "marathon_tracker")))
 	if err != nil {
 		log.Printf("MongoDB persistence unavailable; using empty in-memory state: %v", err)
-		return web.NewServer(nil, web.WithAuthManager(authManager)), func() {}
+		return web.NewServer(nil, web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() {}
 	}
 
 	states, err := store.LoadAll(ctx)
 	if err != nil {
 		log.Printf("MongoDB state load failed; using empty in-memory state: %v", err)
-		return web.NewServer(nil, web.WithAuthManager(authManager)), func() { _ = store.Disconnect(context.Background()) }
+		return web.NewServer(nil, web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() { _ = store.Disconnect(context.Background()) }
 	}
 
 	if len(states) == 0 {
 		log.Printf("No Marathon Tracker projects found; starting empty")
-		return web.NewServer(nil, web.WithProjectStore(store), web.WithAuthManager(authManager)), func() { _ = store.Disconnect(context.Background()) }
+		return web.NewServer(nil, web.WithProjectStore(store), web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() { _ = store.Disconnect(context.Background()) }
 	}
 
 	services := make([]*race.Service, 0, len(states))
@@ -69,7 +74,7 @@ func buildServer() (*web.Server, func()) {
 		services = append(services, service)
 	}
 	log.Printf("Loaded %d Marathon Tracker project(s) from MongoDB", len(services))
-	return web.NewServer(services[0], web.WithProjectStore(store), web.WithProjectServices(services), web.WithAuthManager(authManager)), func() { _ = store.Disconnect(context.Background()) }
+	return web.NewServer(services[0], web.WithProjectStore(store), web.WithProjectServices(services), web.WithAuthManager(authManager), web.WithAnalyzer(analyzer)), func() { _ = store.Disconnect(context.Background()) }
 }
 
 func event() race.Event {

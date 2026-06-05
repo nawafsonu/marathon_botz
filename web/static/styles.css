@@ -389,6 +389,23 @@ button:hover {
   background: var(--orange-2);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.secondary-button {
+  min-height: 2.8rem;
+  padding: 0 1rem;
+  border: 1px solid var(--line);
+  background: #11151a;
+  color: var(--text);
+}
+
+.secondary-button:hover {
+  background: #1a2027;
+}
+
 .form-status {
   min-height: 1.35rem;
   color: var(--muted);
@@ -444,6 +461,21 @@ button:hover {
 .empty-state {
   color: var(--muted);
   font-weight: 700;
+}
+
+.ai-panel {
+  border-color: rgba(154, 255, 89, 0.22);
+}
+
+.analysis-output {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.analysis-output.error {
+  color: var(--danger);
 }
 
 .table-wrap {
