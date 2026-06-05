@@ -50,30 +50,32 @@
           {{end}}
         </section>
 
-        <section class="certificate-metrics" aria-label="Runner race data">
-          <div><span>Status</span><strong>{{.Profile.Participant.Status}}</strong></div>
-          <div><span>Rank</span><strong>{{if gt .Profile.Summary.Rank 0}}#{{.Profile.Summary.Rank}}{{else}}-{{end}}</strong></div>
-          <div><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></div>
-          <div><span>Finish Time</span><strong>{{.Profile.Summary.FinishTime}}</strong></div>
-          <div><span>Latest Checkpoint</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></div>
-          <div><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></div>
-        </section>
+        <div class="certificate-details">
+          <section class="certificate-metrics" aria-label="Runner race data">
+            <div><span>Status</span><strong>{{.Profile.Participant.Status}}</strong></div>
+            <div><span>Rank</span><strong>{{if gt .Profile.Summary.Rank 0}}#{{.Profile.Summary.Rank}}{{else}}-{{end}}</strong></div>
+            <div><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></div>
+            <div><span>Finish Time</span><strong>{{.Profile.Summary.FinishTime}}</strong></div>
+            <div><span>Latest Checkpoint</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></div>
+            <div><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></div>
+          </section>
 
-        <section class="certificate-timeline">
-          <div class="section-heading">
-            <div>
-              <h3>Checkpoint Record</h3>
-              <p>Official checkpoint data recorded by Marathon Tracker</p>
+          <section class="certificate-timeline">
+            <div class="section-heading">
+              <div>
+                <h3>Checkpoint Record</h3>
+                <p>Official checkpoint data recorded by Marathon Tracker</p>
+              </div>
             </div>
-          </div>
-          <ol class="timeline">
-            {{range .Profile.Timeline}}
-              <li><strong>{{.Checkpoint.Name}}</strong><span>{{.Timestamp.Format "15:04:05"}}</span></li>
-            {{else}}
-              <li class="empty-state">No checkpoint records available.</li>
-            {{end}}
-          </ol>
-        </section>
+            <ol class="timeline">
+              {{range .Profile.Timeline}}
+                <li><strong>{{.Checkpoint.Name}}</strong><span>{{.Timestamp.Format "15:04:05"}}</span></li>
+              {{else}}
+                <li class="empty-state">No checkpoint records available.</li>
+              {{end}}
+            </ol>
+          </section>
+        </div>
 
         <footer class="certificate-footer">
           <div>
