@@ -139,9 +139,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /", s.dashboard)
 	s.mux.HandleFunc("GET /race", s.racePage)
 	s.mux.HandleFunc("GET /runners/{bib}", s.runnerProfile)
+	s.mux.HandleFunc("GET /runners/{bib}/certificate", s.runnerCertificate)
 	s.mux.HandleFunc("GET /events/{eventID}", s.dashboard)
 	s.mux.HandleFunc("GET /events/{eventID}/race", s.racePage)
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}", s.runnerProfile)
+	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}/certificate", s.runnerCertificate)
 	s.mux.HandleFunc("GET /api/events", s.events)
 	s.mux.HandleFunc("POST /api/events", s.createEvent)
 	s.mux.HandleFunc("POST /api/events/{eventID}/delete", s.deleteEvent)
@@ -265,6 +267,38 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.templates.ExecuteTemplate(w, "runner.html", data); err != nil {
 		http.Error(w, "runner profile could not be rendered", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) runnerCertificate(w http.ResponseWriter, r *http.Request) {
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	profile, err := service.RunnerProfile(r.PathValue("bib"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	title := "Certificate of Participation"
+	if profile.Participant.Status == race.RaceStatusFinished {
+		title = "Certificate of Completion"
+	}
+	data := struct {
+		Event            race.Event
+		Profile          race.RunnerProfile
+		BasePath         string
+		CertificateTitle string
+		IssuedAt         time.Time
+	}{
+		Event:            service.Event(),
+		Profile:          profile,
+		BasePath:         s.basePathFor(service.Event().ID),
+		CertificateTitle: title,
+		IssuedAt:         time.Now().UTC(),
+	}
+	if err := s.templates.ExecuteTemplate(w, "certificate.html", data); err != nil {
+		http.Error(w, "runner certificate could not be rendered", http.StatusInternalServerError)
 	}
 }
 

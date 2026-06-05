@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Profile.Participant.BibNumber}} Certificate - Marathon Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="certificate-body">
+  <main class="certificate-page">
+    <nav class="certificate-actions" aria-label="Certificate actions">
+      <a class="back-link" href="{{.BasePath}}/runners/{{.Profile.Participant.BibNumber}}">Back to runner</a>
+      <button type="button" class="secondary-button" onclick="window.print()">Print / save PDF</button>
+    </nav>
+
+    <article class="certificate-sheet">
+      <header class="certificate-header">
+        <p>{{.Event.Name}}</p>
+        <h1>{{.CertificateTitle}}</h1>
+        <span>{{.Event.Location}} - {{.Event.Date.Format "02 Jan 2006"}}</span>
+      </header>
+
+      <section class="certificate-recipient">
+        <p>This certifies that</p>
+        <h2>{{.Profile.Participant.Name}}</h2>
+        <span>{{.Profile.Participant.BibNumber}}</span>
+        <p>participated in the {{.Event.DistanceKM}} KM {{.Event.Name}}.</p>
+      </section>
+
+      <section class="certificate-metrics" aria-label="Runner race data">
+        <div><span>Status</span><strong>{{.Profile.Participant.Status}}</strong></div>
+        <div><span>Rank</span><strong>#{{.Profile.Summary.Rank}}</strong></div>
+        <div><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></div>
+        <div><span>Finish Time</span><strong>{{.Profile.Summary.FinishTime}}</strong></div>
+        <div><span>Latest Checkpoint</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></div>
+        <div><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></div>
+      </section>
+
+      <section class="certificate-timeline">
+        <div class="section-heading">
+          <div>
+            <h3>Checkpoint Record</h3>
+            <p>Official checkpoint data recorded by Marathon Tracker</p>
+          </div>
+        </div>
+        <ol class="timeline">
+          {{range .Profile.Timeline}}
+            <li><strong>{{.Checkpoint.Name}}</strong><span>{{.Timestamp.Format "15:04:05"}}</span></li>
+          {{else}}
+            <li class="empty-state">No checkpoint records available.</li>
+          {{end}}
+        </ol>
+      </section>
+
+      <footer class="certificate-footer">
+        <div>
+          <span>Issued</span>
+          <strong>{{.IssuedAt.Format "02 Jan 2006 15:04"}}</strong>
+        </div>
+        <div>
+          <span>Verified Bib</span>
+          <strong>{{.Profile.Participant.BibNumber}}</strong>
+        </div>
+      </footer>
+    </article>
+  </main>
+</body>
+</html>

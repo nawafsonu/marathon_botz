@@ -45,7 +45,7 @@ func buildServer() (*web.Server, func()) {
 		log.Fatal("MONGODB_URI is required; refusing to start without MongoDB persistence")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	store, err := mongostore.Connect(ctx, uri, env("MONGODB_DATABASE", databaseFromURI(uri, "marathon_tracker")))

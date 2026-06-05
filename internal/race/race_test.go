@@ -87,6 +87,33 @@ func TestLeaderboardRanksByProgressThenFinishTime(t *testing.T) {
 	}
 }
 
+func TestLeaderboardGapUsesLiveCheckpointTiming(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+	start := time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)
+	leader := mustRegister(t, svc, "Leader")
+	sameCheckpoint := mustRegister(t, svc, "Same Checkpoint")
+	behind := mustRegister(t, svc, "Behind")
+
+	mustLog(t, svc, leader.BibNumber, "start", start)
+	mustLog(t, svc, leader.BibNumber, "cp1", start.Add(20*time.Minute))
+	mustLog(t, svc, leader.BibNumber, "cp2", start.Add(45*time.Minute))
+
+	mustLog(t, svc, sameCheckpoint.BibNumber, "start", start)
+	mustLog(t, svc, sameCheckpoint.BibNumber, "cp1", start.Add(22*time.Minute))
+	mustLog(t, svc, sameCheckpoint.BibNumber, "cp2", start.Add(50*time.Minute))
+
+	mustLog(t, svc, behind.BibNumber, "start", start)
+	mustLog(t, svc, behind.BibNumber, "cp1", start.Add(27*time.Minute))
+
+	leaderboard := svc.Leaderboard()
+	if got := leaderboard[1].Gap; got != "+5m 00s @ CP2" {
+		t.Fatalf("same checkpoint gap = %q, want +5m 00s @ CP2", got)
+	}
+	if got := leaderboard[2].Gap; got != "+7m 00s @ CP1" {
+		t.Fatalf("behind checkpoint gap = %q, want +7m 00s @ CP1", got)
+	}
+}
+
 func TestSummaryCountsRaceStatuses(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 	start := time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)

@@ -734,25 +734,34 @@ func (s *Service) leaderboardLocked() []LeaderboardEntry {
 		return left.BibNumber < right.BibNumber
 	})
 
-	var leaderFinish time.Time
 	for i := range entries {
 		entries[i].Rank = i + 1
 		if i == 0 {
 			entries[i].Gap = "leader"
-			if finish, ok := s.finishTimestampForBibLocked(entries[i].BibNumber); ok {
-				leaderFinish = finish
-			}
 			continue
 		}
-		if finish, ok := s.finishTimestampForBibLocked(entries[i].BibNumber); ok && !leaderFinish.IsZero() {
-			entries[i].Gap = "+" + formatDuration(finish.Sub(leaderFinish))
-		} else if entries[i].LatestSequence == entries[0].LatestSequence {
-			entries[i].Gap = "same checkpoint"
-		} else {
-			entries[i].Gap = fmt.Sprintf("-%d CP", entries[0].LatestSequence-entries[i].LatestSequence)
-		}
+		entries[i].Gap = s.liveCheckpointGapLocked(entries[0], entries[i])
 	}
 	return entries
+}
+
+func (s *Service) liveCheckpointGapLocked(leader LeaderboardEntry, entry LeaderboardEntry) string {
+	if entry.LatestSequence <= 0 {
+		return "not started"
+	}
+	leaderTime, checkpointName, ok := s.timestampForSequenceLocked(leader.BibNumber, entry.LatestSequence)
+	if !ok {
+		return fmt.Sprintf("-%d CP", leader.LatestSequence-entry.LatestSequence)
+	}
+	entryTime, _, ok := s.timestampForSequenceLocked(entry.BibNumber, entry.LatestSequence)
+	if !ok {
+		return "not started"
+	}
+	delta := entryTime.Sub(leaderTime)
+	if delta < 0 {
+		delta = 0
+	}
+	return fmt.Sprintf("+%s @ %s", formatDuration(delta), checkpointName)
 }
 
 func (s *Service) leaderboardEntryForBibLocked(bibNumber string) LeaderboardEntry {
@@ -832,6 +841,15 @@ func (s *Service) latestTimestampForBibLocked(bibNumber string) time.Time {
 		return time.Time{}
 	}
 	return logs[len(logs)-1].Timestamp
+}
+
+func (s *Service) timestampForSequenceLocked(bibNumber string, sequence int) (time.Time, string, bool) {
+	for _, log := range s.logsForBibLocked(bibNumber) {
+		if log.Checkpoint.Sequence == sequence {
+			return log.Timestamp, log.Checkpoint.Name, true
+		}
+	}
+	return time.Time{}, "", false
 }
 
 func (s *Service) finishTimestampForBibLocked(bibNumber string) (time.Time, bool) {

@@ -202,6 +202,56 @@ func TestDeleteMarathonEndpointRemovesProjectFromStoreAndRegistry(t *testing.T) 
 	}
 }
 
+func TestRunnerCertificatePageIncludesMarathonAndRunnerData(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	finished := mustRegisterWeb(t, svc, "Certificate Runner")
+	start := time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)
+	for _, step := range []struct {
+		checkpoint string
+		offset     time.Duration
+	}{
+		{"start", 0},
+		{"cp1", 22 * time.Minute},
+		{"cp2", 50 * time.Minute},
+		{"finish", 95 * time.Minute},
+	} {
+		if _, err := svc.RecordCheckpoint(finished.BibNumber, step.checkpoint, "vol-1", start.Add(step.offset)); err != nil {
+			t.Fatalf("record %s: %v", step.checkpoint, err)
+		}
+	}
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/runners/"+finished.BibNumber+"/certificate", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	for _, required := range []string{"Certificate of Completion", "Kochi Marathon 2026", "Certificate Runner", finished.BibNumber, "Race Time", "1h 35m 00s", "Finish Time"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("certificate missing %q in body: %s", required, body)
+		}
+	}
+}
+
+func TestRunnerProfileLinksToCertificate(t *testing.T) {
+	svc := testService(t)
+	handler := NewServer(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/runners/BIB-001", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "/runners/BIB-001/certificate") {
+		t.Fatalf("runner profile should link to certificate page: %s", res.Body.String())
+	}
+}
+
 func TestFinalCSVExportContainsRankedRunners(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)
@@ -612,6 +662,15 @@ func testCheckpoints() []race.Checkpoint {
 		{ID: "cp2", Name: "CP2", Sequence: 3, DistanceKM: 10},
 		{ID: "finish", Name: "Finish", Sequence: 4, DistanceKM: 42},
 	}
+}
+
+func mustRegisterWeb(t *testing.T, svc *race.Service, name string) race.Participant {
+	t.Helper()
+	participant, err := svc.RegisterParticipant(name, "+91 90000 10000", "")
+	if err != nil {
+		t.Fatalf("register %s: %v", name, err)
+	}
+	return participant
 }
 
 type memoryProjectStore struct {
