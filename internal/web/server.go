@@ -244,9 +244,9 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := struct {
-		Event   race.Event
-		Profile race.RunnerProfile
-		BasePath string
+		Event     race.Event
+		Profile   race.RunnerProfile
+		BasePath  string
 		AIEnabled bool
 	}{
 		Event:     service.Event(),

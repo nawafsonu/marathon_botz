@@ -69,11 +69,11 @@ func NewClient(apiKey string, model string, options ...Option) (*Client, error) 
 
 func (c *Client) AnalyzeRace(ctx context.Context, snapshot race.Snapshot) (string, error) {
 	payload := struct {
-		Event       race.Event              `json:"event"`
-		Summary     race.Summary            `json:"summary"`
-		Checkpoints []race.Checkpoint        `json:"checkpoints"`
-		Leaderboard []race.LeaderboardEntry  `json:"leaderboard"`
-		LiveFeed    []race.CheckpointLog     `json:"liveFeed"`
+		Event        race.Event              `json:"event"`
+		Summary      race.Summary            `json:"summary"`
+		Checkpoints  []race.Checkpoint       `json:"checkpoints"`
+		Leaderboard  []race.LeaderboardEntry `json:"leaderboard"`
+		LiveFeed     []race.CheckpointLog    `json:"liveFeed"`
 		Participants []race.Participant      `json:"participants"`
 	}{
 		Event:        snapshot.Event,
