@@ -124,7 +124,17 @@ func TestAnalyzeRunnerSendsSpecificRunnerDataAndStructuredPrompt(t *testing.T) {
 	if !strings.Contains(captured.Messages[0].Content, "Return only valid JSON") {
 		t.Fatalf("system prompt is not structured: %s", captured.Messages[0].Content)
 	}
-	for _, required := range []string{"checkpoint-to-checkpoint speed", "pace", "performance must be an object", "checkpointInsight must compare each checkpoint segment", "Do not mention hydration", "nutrition"} {
+	for _, required := range []string{
+		"checkpoint-to-checkpoint speed",
+		"pace",
+		"performance must be an object",
+		"segmentAnalysis array",
+		"distanceKm, duration, pace, speedKmh, and anomaly",
+		"checkpointInsight must compare every checkpointSpeedSegments item",
+		"Never give hydration",
+		"coaching advice",
+		"timing-ops actions only",
+	} {
 		if !strings.Contains(captured.Messages[0].Content, required) {
 			t.Fatalf("system prompt missing %q: %s", required, captured.Messages[0].Content)
 		}

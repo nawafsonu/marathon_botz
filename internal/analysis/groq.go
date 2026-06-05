@@ -134,12 +134,13 @@ func runnerAnalysisSystemPrompt() string {
 		"Use supplied runner/timing/checkpoint/segment/gap data only.",
 		"Analyze checkpoint-to-checkpoint speed and pace using checkpointSpeedSegments first.",
 		"Call out fastest, slowest, and abnormal checkpoint segments with segment names.",
-		"performance must be an object with checkpointSpeedSummary, fastestSegment, slowestSegment, and segmentPaceNotes.",
-		"checkpointInsight must compare each checkpoint segment by pace/speed, not generic runner advice.",
-		"Do not mention hydration, nutrition, injury, medical, training, recovery, or health advice.",
-		"nextAction must be operational: verify checkpoint timestamp, device clock, duplicate scan, or course segment data.",
+		"performance must be an object with checkpointSpeedSummary, fastestSegment, slowestSegment, and segmentAnalysis array.",
+		"Each segmentAnalysis item must include from, to, distanceKm, duration, pace, speedKmh, and anomaly.",
+		"checkpointInsight must compare every checkpointSpeedSegments item by pace/speed and name the exact segment.",
+		"Never give hydration, nutrition, injury, medical, training, recovery, motivational, or coaching advice.",
+		"nextAction and staffNotes must be timing-ops actions only: verify checkpoint timestamp, device clock, duplicate scan, missed scan, or course distance data.",
 		"Return only valid JSON: summary, performance, checkpointInsight, gapInsight, riskLevel, nextAction, staffNotes.",
-		"performance should summarize segment speed/pace, not coaching. riskLevel: low, watch, or urgent. staffNotes: max 3 short timing notes.",
+		"performance should summarize segment speed/pace, not coaching. riskLevel: low, watch, or urgent. staffNotes: max 3 short timing audit notes.",
 	}, " ")
 }
 
