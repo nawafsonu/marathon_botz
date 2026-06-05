@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,7 +34,8 @@ type Server struct {
 	authManager  *auth.Manager
 	analyzer     *analysis.Client
 	sessionMu    sync.RWMutex
-	sessions     map[string]string
+	sessionPath  string
+	sessions     map[string]sessionRecord
 }
 
 type projectRegistry struct {
@@ -52,6 +54,11 @@ type projectSummary struct {
 	RaceURL      string `json:"raceUrl"`
 }
 
+type sessionRecord struct {
+	Username  string
+	ExpiresAt time.Time
+}
+
 type projectDeleter interface {
 	Delete(ctx context.Context, id string) error
 }
@@ -59,6 +66,11 @@ type projectDeleter interface {
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Option func(*Server)
+
+const (
+	sessionCookieName = "mt_session"
+	sessionTTL        = 7 * 24 * time.Hour
+)
 
 func WithStaticDir(path string) Option {
 	return func(s *Server) {
@@ -96,6 +108,9 @@ func WithProjectServices(services []*race.Service) Option {
 func WithAuthManager(manager *auth.Manager) Option {
 	return func(s *Server) {
 		s.authManager = manager
+		if manager != nil {
+			s.sessionPath = manager.SessionPath()
+		}
 	}
 }
 
@@ -111,11 +126,12 @@ func NewServer(service *race.Service, options ...Option) *Server {
 		service:   service,
 		projects:  newProjectRegistry(service),
 		staticDir: "web/static",
-		sessions:  make(map[string]string),
+		sessions:  make(map[string]sessionRecord),
 	}
 	for _, option := range options {
 		option(server)
 	}
+	server.loadSessions()
 	if server.templates == nil {
 		server.templates = template.Must(template.ParseGlob(resolvePath(filepath.Join("web", "templates", "*.html"))))
 	}
@@ -342,13 +358,22 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session could not be created", http.StatusInternalServerError)
 		return
 	}
+	expiresAt := time.Now().UTC().Add(sessionTTL)
 	s.sessionMu.Lock()
-	s.sessions[token] = user.Username
+	s.sessions[token] = sessionRecord{Username: user.Username, ExpiresAt: expiresAt}
+	if err := s.saveSessionsLocked(); err != nil {
+		delete(s.sessions, token)
+		s.sessionMu.Unlock()
+		http.Error(w, "session could not be saved", http.StatusInternalServerError)
+		return
+	}
 	s.sessionMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
-		Name:     "mt_session",
+		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
+		Expires:  expiresAt,
+		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -356,12 +381,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("mt_session"); err == nil {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		s.sessionMu.Lock()
 		delete(s.sessions, cookie.Value)
+		_ = s.saveSessionsLocked()
 		s.sessionMu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "mt_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -955,17 +981,23 @@ func (s *Server) authenticatedUser(r *http.Request) (auth.User, bool) {
 	if s.authManager == nil {
 		return auth.User{}, false
 	}
-	cookie, err := r.Cookie("mt_session")
+	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil || cookie.Value == "" {
 		return auth.User{}, false
 	}
-	s.sessionMu.RLock()
-	username, ok := s.sessions[cookie.Value]
-	s.sessionMu.RUnlock()
+	now := time.Now().UTC()
+	s.sessionMu.Lock()
+	record, ok := s.sessions[cookie.Value]
+	if ok && !record.ExpiresAt.IsZero() && now.After(record.ExpiresAt) {
+		delete(s.sessions, cookie.Value)
+		_ = s.saveSessionsLocked()
+		ok = false
+	}
+	s.sessionMu.Unlock()
 	if !ok {
 		return auth.User{}, false
 	}
-	return s.authManager.User(username)
+	return s.authManager.User(record.Username)
 }
 
 func (s *Server) volunteers() []auth.User {
@@ -981,6 +1013,71 @@ func sessionToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(raw[:]), nil
+}
+
+func (s *Server) loadSessions() {
+	if s.sessionPath == "" {
+		return
+	}
+	data, err := os.ReadFile(s.sessionPath)
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	loaded := make(map[string]sessionRecord)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Split(line, ":")
+		if len(parts) != 3 {
+			continue
+		}
+		token := strings.TrimSpace(parts[0])
+		username := strings.ToLower(strings.TrimSpace(parts[1]))
+		expiresUnix, err := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+		if err != nil || token == "" || username == "" {
+			continue
+		}
+		expiresAt := time.Unix(expiresUnix, 0).UTC()
+		if !expiresAt.After(now) {
+			continue
+		}
+		loaded[token] = sessionRecord{Username: username, ExpiresAt: expiresAt}
+	}
+	if len(loaded) == 0 {
+		return
+	}
+	s.sessionMu.Lock()
+	s.sessions = loaded
+	s.sessionMu.Unlock()
+}
+
+func (s *Server) saveSessionsLocked() error {
+	if s.sessionPath == "" {
+		return nil
+	}
+	var builder strings.Builder
+	builder.WriteString("# token:username:expires_unix\n")
+	tokens := make([]string, 0, len(s.sessions))
+	for token := range s.sessions {
+		tokens = append(tokens, token)
+	}
+	sort.Strings(tokens)
+	for _, token := range tokens {
+		record := s.sessions[token]
+		if token == "" || record.Username == "" {
+			continue
+		}
+		builder.WriteString(token)
+		builder.WriteString(":")
+		builder.WriteString(record.Username)
+		builder.WriteString(":")
+		builder.WriteString(strconv.FormatInt(record.ExpiresAt.Unix(), 10))
+		builder.WriteString("\n")
+	}
+	return os.WriteFile(s.sessionPath, []byte(builder.String()), 0600)
 }
 
 func defaultCheckpoints(distanceKM int) []race.Checkpoint {

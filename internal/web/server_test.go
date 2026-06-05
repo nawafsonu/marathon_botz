@@ -397,6 +397,33 @@ func TestAuthRedirectsToLoginAndAllowsAdminVolunteerManagement(t *testing.T) {
 	}
 }
 
+func TestAuthSessionSurvivesServerRestart(t *testing.T) {
+	credentialsPath := filepath.Join(t.TempDir(), "logincred.txt")
+	manager, err := auth.NewManager(credentialsPath)
+	if err != nil {
+		t.Fatalf("auth manager: %v", err)
+	}
+	first := NewServer(testService(t), WithAuthManager(manager))
+	cookie := loginCookie(t, first, "admin", "admin2026")
+
+	reloadedManager, err := auth.NewManager(credentialsPath)
+	if err != nil {
+		t.Fatalf("reloaded auth manager: %v", err)
+	}
+	restarted := NewServer(testService(t), WithAuthManager(reloadedManager))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	restarted.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status after restart = %d, want 200; location=%q body=%s", res.Code, res.Header().Get("Location"), res.Body.String())
+	}
+	if strings.Contains(res.Body.String(), "Login") {
+		t.Fatalf("session should not show login after restart: %s", res.Body.String())
+	}
+}
+
 func TestVolunteerRacePageHidesAdminSetupControls(t *testing.T) {
 	manager, err := auth.NewManager(filepath.Join(t.TempDir(), "logincred.txt"))
 	if err != nil {

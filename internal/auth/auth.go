@@ -40,6 +40,13 @@ func NewManager(path string) (*Manager, error) {
 	return manager, nil
 }
 
+func (m *Manager) SessionPath() string {
+	if m == nil || strings.TrimSpace(m.path) == "" {
+		return ""
+	}
+	return m.path + ".sessions"
+}
+
 func (m *Manager) Authenticate(username, password string) (User, bool) {
 	username = normalizeUsername(username)
 	m.mu.RLock()
