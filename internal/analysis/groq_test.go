@@ -25,6 +25,12 @@ func TestAnalyzeRaceUsesConfiguredGroqModel(t *testing.T) {
 		if !strings.Contains(text, `"model":"openai/gpt-oss-120b"`) {
 			t.Fatalf("request did not use gpt-oss model: %s", text)
 		}
+		if !strings.Contains(text, `"reasoning_effort":"low"`) {
+			t.Fatalf("request did not lower gpt-oss reasoning effort: %s", text)
+		}
+		if !strings.Contains(text, `"include_reasoning":false`) {
+			t.Fatalf("request did not exclude gpt-oss reasoning from output: %s", text)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),

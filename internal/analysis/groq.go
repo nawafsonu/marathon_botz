@@ -196,6 +196,11 @@ func (c *Client) completeWithLimit(ctx context.Context, systemPrompt string, use
 		Temperature: 0.2,
 		MaxTokens:   maxTokens,
 	}
+	if isGPTOSSModel(c.model) {
+		includeReasoning := false
+		requestBody.IncludeReasoning = &includeReasoning
+		requestBody.ReasoningEffort = "low"
+	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return "", err
@@ -259,11 +264,17 @@ func lastN[T any](items []T, limit int) []T {
 	return items[len(items)-limit:]
 }
 
+func isGPTOSSModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "openai/gpt-oss-")
+}
+
 type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
+	Model            string        `json:"model"`
+	Messages         []chatMessage `json:"messages"`
+	Temperature      float64       `json:"temperature"`
+	MaxTokens        int           `json:"max_tokens"`
+	ReasoningEffort  string        `json:"reasoning_effort,omitempty"`
+	IncludeReasoning *bool         `json:"include_reasoning,omitempty"`
 }
 
 type chatMessage struct {
