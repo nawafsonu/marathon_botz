@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
@@ -26,18 +27,19 @@ import (
 )
 
 type Server struct {
-	mux          *http.ServeMux
-	service      *race.Service
-	projects     *projectRegistry
-	projectStore race.Store
-	templates    *template.Template
-	staticDir    string
-	authManager  *auth.Manager
-	analyzer     *analysis.Client
-	chestReader  *chestreader.Client
-	sessionMu    sync.RWMutex
-	sessionPath  string
-	sessions     map[string]sessionRecord
+	mux           *http.ServeMux
+	service       *race.Service
+	projects      *projectRegistry
+	projectStore  race.Store
+	templates     *template.Template
+	staticDir     string
+	authManager   *auth.Manager
+	analyzer      *analysis.Client
+	chestReader   *chestreader.Client
+	chestReaderMu sync.RWMutex
+	sessionMu     sync.RWMutex
+	sessionPath   string
+	sessions      map[string]sessionRecord
 }
 
 type projectRegistry struct {
@@ -198,6 +200,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /events/{eventID}/api/participants/{bib}/delete", s.deleteParticipant)
 	s.mux.HandleFunc("POST /api/import-runners", s.importRunners)
 	s.mux.HandleFunc("POST /events/{eventID}/api/import-runners", s.importRunners)
+	s.mux.HandleFunc("POST /api/chest-reader/config", s.configureChestReader)
+	s.mux.HandleFunc("POST /events/{eventID}/api/chest-reader/config", s.configureChestReader)
 	s.mux.HandleFunc("POST /api/chest-reader/scan", s.scanChestNumber)
 	s.mux.HandleFunc("POST /events/{eventID}/api/chest-reader/scan", s.scanChestNumber)
 	s.mux.HandleFunc("POST /api/checkpoint-logs", s.recordCheckpoint)
@@ -273,7 +277,7 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 		User:               s.currentUser(r),
 		AuthEnabled:        s.authManager != nil,
 		CanManage:          s.canManage(r),
-		ChestReaderEnabled: s.chestReader != nil,
+		ChestReaderEnabled: s.currentChestReader() != nil,
 	}
 	if err := s.templates.ExecuteTemplate(w, "race.html", data); err != nil {
 		http.Error(w, "race page could not be rendered", http.StatusInternalServerError)
@@ -758,6 +762,46 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, log)
 }
 
+func (s *Server) configureChestReader(w http.ResponseWriter, r *http.Request) {
+	if !s.canManage(r) {
+		writeProblem(w, http.StatusForbidden, "Only admins can configure the chest reader.")
+		return
+	}
+	if _, ok := s.serviceForRequest(w, r); !ok {
+		return
+	}
+	var input struct {
+		URL           string  `json:"url"`
+		Port          string  `json:"port"`
+		Token         string  `json:"token"`
+		MinConfidence float64 `json:"minConfidence"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
+		return
+	}
+	readerURL, err := chestReaderURL(input.URL, input.Port)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	token := strings.TrimSpace(input.Token)
+	if token == "" {
+		token = os.Getenv("CHEST_READER_TOKEN")
+	}
+	reader, err := chestreader.New(readerURL, token, input.MinConfidence)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.setChestReader(reader)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": true,
+		"url":     readerURL,
+		"message": "Chest reader connected.",
+	})
+}
+
 type chestReaderCandidate struct {
 	BibNumber     string  `json:"bibNumber"`
 	Confidence    float64 `json:"confidence"`
@@ -779,7 +823,8 @@ type chestReaderScanResponse struct {
 }
 
 func (s *Server) scanChestNumber(w http.ResponseWriter, r *http.Request) {
-	if s.chestReader == nil {
+	reader := s.currentChestReader()
+	if reader == nil {
 		writeProblem(w, http.StatusServiceUnavailable, "Chest reader is not configured.")
 		return
 	}
@@ -806,14 +851,14 @@ func (s *Server) scanChestNumber(w http.ResponseWriter, r *http.Request) {
 	if header != nil {
 		contentType = header.Header.Get("Content-Type")
 	}
-	result, err := s.chestReader.Read(ctx, header.Filename, contentType, file)
+	result, err := reader.Read(ctx, header.Filename, contentType, file)
 	if err != nil {
 		writeProblem(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
 	candidates := registeredChestReaderCandidates(result, service.Participants())
-	trusted := trustedChestReaderCandidate(candidates, s.chestReader.MinConfidence())
+	trusted := trustedChestReaderCandidate(candidates, reader.MinConfidence())
 	response := chestReaderScanResponse{
 		Enabled:    true,
 		Candidates: candidates,
@@ -839,6 +884,37 @@ func participantByID(participants []race.Participant, id string) (race.Participa
 		}
 	}
 	return race.Participant{}, false
+}
+
+func (s *Server) currentChestReader() *chestreader.Client {
+	s.chestReaderMu.RLock()
+	defer s.chestReaderMu.RUnlock()
+	return s.chestReader
+}
+
+func (s *Server) setChestReader(reader *chestreader.Client) {
+	s.chestReaderMu.Lock()
+	defer s.chestReaderMu.Unlock()
+	s.chestReader = reader
+}
+
+func chestReaderURL(rawURL string, rawPort string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL != "" {
+		if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+			return "", errors.New("OCR URL must start with http:// or https://")
+		}
+		return rawURL, nil
+	}
+	port := strings.TrimSpace(rawPort)
+	if port == "" {
+		port = "8096"
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number <= 0 || number > 65535 {
+		return "", errors.New("OCR port must be between 1 and 65535")
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/read", number), nil
 }
 
 func registeredChestReaderCandidates(result chestreader.Result, participants []race.Participant) []chestReaderCandidate {

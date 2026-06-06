@@ -132,13 +132,26 @@
               <div class="chest-reader-header">
                 <div>
                   <strong>Camera chest reader</strong>
-                  <span>{{if .ChestReaderEnabled}}Auto-submit after two matching reads{{else}}Set CHEST_READER_URL to enable camera scan{{end}}</span>
+                  <span id="chest-reader-help">{{if .ChestReaderEnabled}}Auto-submit after two matching reads{{else}}Connect local OCR to enable camera scan{{end}}</span>
                 </div>
                 <div class="chest-reader-actions">
                   <button type="button" class="secondary-button" id="chest-reader-start" {{if not .ChestReaderEnabled}}disabled{{end}}>Scan chest</button>
                   <button type="button" class="secondary-button muted-button" id="chest-reader-stop" hidden>Stop</button>
                 </div>
               </div>
+              {{if .CanManage}}
+              <div id="chest-reader-config-form" class="chest-reader-config">
+                <label>
+                  Local OCR port
+                  <input name="port" type="number" min="1" max="65535" value="8096" inputmode="numeric">
+                </label>
+                <label>
+                  OCR URL
+                  <input name="url" type="url" placeholder="http://127.0.0.1:8096/read">
+                </label>
+                <button type="button" class="secondary-button" id="chest-reader-config-submit">Connect OCR</button>
+              </div>
+              {{end}}
               <div class="chest-reader-preview" hidden>
                 <video id="chest-reader-video" playsinline muted></video>
                 <canvas id="chest-reader-canvas" width="640" height="480" hidden></canvas>

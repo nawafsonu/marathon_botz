@@ -25,6 +25,9 @@ const chestReaderVideo = document.querySelector("#chest-reader-video");
 const chestReaderCanvas = document.querySelector("#chest-reader-canvas");
 const chestReaderPreview = document.querySelector(".chest-reader-preview");
 const chestReaderCandidates = document.querySelector("#chest-reader-candidates");
+const chestReaderConfigForm = document.querySelector("#chest-reader-config-form");
+const chestReaderConfigSubmit = document.querySelector("#chest-reader-config-submit");
+const chestReaderHelp = document.querySelector("#chest-reader-help");
 
 let chestReaderStream = null;
 let chestReaderTimer = null;
@@ -98,6 +101,28 @@ chestReaderStart?.addEventListener("click", async () => {
     chestReaderTimer = window.setInterval(scanChestFrame, 900);
   } catch (error) {
     setStatus(checkpointStatus, `Camera unavailable: ${error.message}`, "error");
+  }
+});
+
+chestReaderConfigSubmit?.addEventListener("click", async () => {
+  if (!chestReaderConfigForm || !chestReaderRoot) return;
+  const port = chestReaderConfigForm.querySelector("[name='port']")?.value || "";
+  const url = chestReaderConfigForm.querySelector("[name='url']")?.value || "";
+  setStatus(checkpointStatus, "Connecting OCR service...");
+  chestReaderConfigSubmit.disabled = true;
+  try {
+    const result = await postJSON(`${basePath}/api/chest-reader/config`, {
+      port,
+      url,
+    });
+    chestReaderRoot.dataset.chestReaderEnabled = "true";
+    if (chestReaderStart) chestReaderStart.disabled = false;
+    if (chestReaderHelp) chestReaderHelp.textContent = `Connected to ${result.url}. Auto-submit after two matching reads.`;
+    setStatus(checkpointStatus, result.message || "Chest reader connected.", "success");
+  } catch (error) {
+    setStatus(checkpointStatus, error.message, "error");
+  } finally {
+    chestReaderConfigSubmit.disabled = false;
   }
 });
 
