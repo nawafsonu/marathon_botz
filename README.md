@@ -68,6 +68,8 @@ CHEST_READER_TOKEN=
 CHEST_READER_MIN_CONFIDENCE=0.82
 ```
 
+You can also connect OCR at runtime from the race page. Log in as admin, enter local OCR port `8096` in the Camera chest reader block, then press `Connect OCR`. This updates the Go server in memory without editing `.env` or restarting the app.
+
 YOLO is used to crop the person/chest area; OCR reads the text. For production accuracy, replace the generic YOLO model with a race-specific bib detector trained from labeled event photos.
 
 ## MongoDB Persistence

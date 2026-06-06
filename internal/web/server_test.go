@@ -177,6 +177,50 @@ func TestChestReaderScanDisabledReturnsSafeError(t *testing.T) {
 	}
 }
 
+func TestChestReaderConfigConnectsLocalPortAtRuntime(t *testing.T) {
+	svc := testService(t)
+	ocr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/read" {
+			t.Fatalf("path = %s, want /read", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"001","normalizedBib":"BIB-001","confidence":0.91,"candidates":[{"bibNumber":"BIB-001","confidence":0.91}],"boxes":[]}`))
+	}))
+	t.Cleanup(ocr.Close)
+	parsed, err := url.Parse(ocr.URL)
+	if err != nil {
+		t.Fatalf("parse ocr url: %v", err)
+	}
+	handler := NewServer(svc)
+
+	configReq := httptest.NewRequest(http.MethodPost, "/api/chest-reader/config", strings.NewReader(`{"port":"`+parsed.Port()+`"}`))
+	configReq.Header.Set("Content-Type", "application/json")
+	configRes := httptest.NewRecorder()
+	handler.ServeHTTP(configRes, configReq)
+	if configRes.Code != http.StatusOK {
+		t.Fatalf("config status = %d, want 200; body: %s", configRes.Code, configRes.Body.String())
+	}
+
+	body, contentType := chestReaderUpload(t)
+	scanReq := httptest.NewRequest(http.MethodPost, "/api/chest-reader/scan", body)
+	scanReq.Header.Set("Content-Type", contentType)
+	scanRes := httptest.NewRecorder()
+	handler.ServeHTTP(scanRes, scanReq)
+	if scanRes.Code != http.StatusOK {
+		t.Fatalf("scan status = %d, want 200; body: %s", scanRes.Code, scanRes.Body.String())
+	}
+	var result struct {
+		AutoSubmit bool   `json:"autoSubmit"`
+		BibNumber  string `json:"bibNumber"`
+	}
+	if err := json.NewDecoder(scanRes.Body).Decode(&result); err != nil {
+		t.Fatalf("decode scan result: %v", err)
+	}
+	if !result.AutoSubmit || result.BibNumber != "BIB-001" {
+		t.Fatalf("unexpected scan result: %+v", result)
+	}
+}
+
 func TestChestReaderScanAutoSubmitsOnlyRegisteredHighConfidenceBib(t *testing.T) {
 	svc := testService(t)
 	reader := testChestReaderClient(t, `{"text":"001","normalizedBib":"BIB-001","confidence":0.91,"candidates":[{"bibNumber":"BIB-001","confidence":0.91}],"boxes":[]}`)
@@ -747,6 +791,9 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	}
 	if !strings.Contains(raceRes.Body.String(), `id="chest-reader-start"`) {
 		t.Fatal("race page should render the chest reader scan button")
+	}
+	if !strings.Contains(raceRes.Body.String(), `id="chest-reader-config-form"`) || !strings.Contains(raceRes.Body.String(), `Connect OCR`) {
+		t.Fatal("race page should render the chest reader config controls")
 	}
 	if !strings.Contains(raceRes.Body.String(), `<select name="name"`) {
 		t.Fatal("race page should render checkpoint name as a dropdown")
