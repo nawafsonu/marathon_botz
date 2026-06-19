@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultEndpoint = "https://api.groq.com/openai/v1/chat/completions"
-	defaultModel    = "openai/gpt-oss-120b"
+	defaultModel    = "llama-3.3-70b-specdec"
 )
 
 type Client struct {
@@ -68,13 +68,27 @@ func NewClient(apiKey string, model string, options ...Option) (*Client, error) 
 	return client, nil
 }
 
+func raceAnalysisSystemPrompt() string {
+	return strings.Join([]string{
+		"You are a Senior Marathon Operations Analyst.",
+		"Use the supplied JSON data to perform a deep, detailed, and comprehensive analysis of the current race state.",
+		"Specifically, cover:",
+		"1. Overall Event Status: summarize total registered runners, finished runners, active runners, and DNF counts.",
+		"2. Leaderboard Dynamics: analyze top performers, category-specific leaders, close timing gaps, and intense placement battles.",
+		"3. Live Feed Trends: summarize notable recent events and runner progress patterns.",
+		"4. Operational Highlights: flag any potential timing anomalies, runners with unusually high pace/speed changes, or other concerns for the race coordinators.",
+		"Avoid giving any hydration, nutrition, medical, coaching, or training advice.",
+		"Structure your response professionally with clear sections, using Markdown formatting for readability.",
+	}, " ")
+}
+
 func (c *Client) AnalyzeRace(ctx context.Context, snapshot race.Snapshot) (string, error) {
 	payload := raceAnalysisPayload(snapshot)
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-	return c.completeWithLimit(ctx, "Marathon ops analyst. Use supplied data only. Be concise. Avoid medical advice.", string(data), 360)
+	return c.completeWithLimit(ctx, raceAnalysisSystemPrompt(), string(data), 1024)
 }
 
 func (c *Client) AnalyzeRunner(ctx context.Context, event race.Event, profile race.RunnerProfile) (string, error) {
@@ -83,7 +97,7 @@ func (c *Client) AnalyzeRunner(ctx context.Context, event race.Event, profile ra
 	if err != nil {
 		return "", err
 	}
-	return c.completeWithLimit(ctx, runnerAnalysisSystemPrompt(), string(data), 360)
+	return c.completeWithLimit(ctx, runnerAnalysisSystemPrompt(), string(data), 1024)
 }
 
 func raceAnalysisPayload(snapshot race.Snapshot) map[string]any {
@@ -107,6 +121,25 @@ func raceAnalysisPayload(snapshot race.Snapshot) map[string]any {
 			"gap":    entry.Gap,
 		})
 	}
+	categoryLeaderboards := make([]map[string]any, 0, len(snapshot.CategoryLeaderboards))
+	for _, catBoard := range snapshot.CategoryLeaderboards {
+		entries := make([]map[string]any, 0, len(firstN(catBoard.Entries, 5)))
+		for _, entry := range firstN(catBoard.Entries, 5) {
+			entries = append(entries, map[string]any{
+				"bib":    entry.BibNumber,
+				"name":   entry.RunnerName,
+				"rank":   entry.Rank,
+				"status": entry.Status,
+				"cp":     entry.LatestCheckpoint,
+				"time":   entry.RaceTime,
+				"gap":    entry.Gap,
+			})
+		}
+		categoryLeaderboards = append(categoryLeaderboards, map[string]any{
+			"category": catBoard.Category,
+			"entries":  entries,
+		})
+	}
 	feed := make([]map[string]any, 0, len(firstN(snapshot.LiveFeed, 8)))
 	for _, log := range firstN(snapshot.LiveFeed, 8) {
 		feed = append(feed, map[string]any{
@@ -121,10 +154,11 @@ func raceAnalysisPayload(snapshot race.Snapshot) map[string]any {
 			"distanceKm": snapshot.Event.DistanceKM,
 			"status":     snapshot.Event.Status,
 		},
-		"summary":     snapshot.Summary,
-		"checkpoints": checkpoints,
-		"leaders":     leaderboard,
-		"feed":        feed,
+		"summary":              snapshot.Summary,
+		"checkpoints":          checkpoints,
+		"leaders":              leaderboard,
+		"categoryLeaderboards": categoryLeaderboards,
+		"feed":                 feed,
 	}
 }
 

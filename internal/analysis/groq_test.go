@@ -13,7 +13,8 @@ import (
 )
 
 func TestAnalyzeRaceUsesConfiguredGroqModel(t *testing.T) {
-	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	// 1. Test explicitly configured GPT-OSS model with reasoning parameters
+	transportGPT := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if got := req.Header.Get("Authorization"); got != "Bearer test-key" {
 			t.Fatalf("authorization header = %q", got)
 		}
@@ -37,19 +38,50 @@ func TestAnalyzeRaceUsesConfiguredGroqModel(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"role":"assistant","content":"Race is stable."}}]}`)),
 		}, nil
 	})
-	client, err := NewClient("test-key", "", WithHTTPClient(&http.Client{Transport: transport}), WithEndpoint("https://example.test/chat"))
+	clientGPT, err := NewClient("test-key", "openai/gpt-oss-120b", WithHTTPClient(&http.Client{Transport: transportGPT}), WithEndpoint("https://example.test/chat"))
 	if err != nil {
-		t.Fatalf("new client: %v", err)
+		t.Fatalf("new client GPT: %v", err)
 	}
-
-	text, err := client.AnalyzeRace(context.Background(), race.Snapshot{
-		Event: race.Event{Name: "Mumbai Marathon"},
-		Summary: race.Summary{
-			TotalParticipants: 10,
-		},
+	_, err = clientGPT.AnalyzeRace(context.Background(), race.Snapshot{
+		Event:   race.Event{Name: "Mumbai Marathon"},
+		Summary: race.Summary{TotalParticipants: 10},
 	})
 	if err != nil {
-		t.Fatalf("analyze race: %v", err)
+		t.Fatalf("analyze race GPT: %v", err)
+	}
+
+	// 2. Test default Llama model without reasoning parameters
+	transportLlama := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		text := string(body)
+		if !strings.Contains(text, `"model":"llama-3.3-70b-specdec"`) {
+			t.Fatalf("request did not use default llama model: %s", text)
+		}
+		if strings.Contains(text, `"reasoning_effort"`) {
+			t.Fatalf("request should not contain reasoning effort for llama: %s", text)
+		}
+		if strings.Contains(text, `"include_reasoning"`) {
+			t.Fatalf("request should not contain include reasoning for llama: %s", text)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"role":"assistant","content":"Race is stable."}}]}`)),
+		}, nil
+	})
+	clientLlama, err := NewClient("test-key", "", WithHTTPClient(&http.Client{Transport: transportLlama}), WithEndpoint("https://example.test/chat"))
+	if err != nil {
+		t.Fatalf("new client Llama: %v", err)
+	}
+	text, err := clientLlama.AnalyzeRace(context.Background(), race.Snapshot{
+		Event:   race.Event{Name: "Mumbai Marathon"},
+		Summary: race.Summary{TotalParticipants: 10},
+	})
+	if err != nil {
+		t.Fatalf("analyze race Llama: %v", err)
 	}
 	if text != "Race is stable." {
 		t.Fatalf("analysis = %q", text)
@@ -139,8 +171,8 @@ func TestAnalyzeRunnerSendsSpecificRunnerDataAndStructuredPrompt(t *testing.T) {
 			t.Fatalf("system prompt missing %q: %s", required, captured.Messages[0].Content)
 		}
 	}
-	if captured.MaxTokens > 360 {
-		t.Fatalf("max tokens = %d, want <= 360", captured.MaxTokens)
+	if captured.MaxTokens > 1024 {
+		t.Fatalf("max tokens = %d, want <= 1024", captured.MaxTokens)
 	}
 	userPayload := captured.Messages[1].Content
 	for _, required := range []string{"Mumbai Marathon 2026", "Nawaf", "BIB-007", "CP1", "checkpointSpeedSegments", `"distanceKm":5`, `"durationSeconds":1500`, "5:00/km", `"speedKmh":12`, "+2m 00s @ CP1"} {

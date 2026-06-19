@@ -578,7 +578,7 @@ async function refreshState() {
   updateCheckpoints(state.checkpoints);
   updateParticipants(state.participants);
   updateFeed(state.liveFeed);
-  updateLeaderboard(state.leaderboard);
+  updateLeaderboard(state);
 }
 
 function updateEvent(eventData) {
@@ -680,12 +680,27 @@ function updateFeed(feed) {
 }
 
 let _activeLeaderboardCategory = "";
+let _lastLeaderboardState = null;
 
-function updateLeaderboard(entries) {
+function updateLeaderboard(state) {
+  _lastLeaderboardState = state;
+  const entries = _activeLeaderboardCategory === ""
+    ? (state.leaderboard || [])
+    : getCategoryEntries(state, _activeLeaderboardCategory);
+  renderLeaderboardEntries(entries);
+}
+
+function getCategoryEntries(state, category) {
+  const categoryBoards = state.categoryLeaderboards || [];
+  const board = categoryBoards.find((b) => b.category === category);
+  return board ? board.entries : [];
+}
+
+function renderLeaderboardEntries(entries) {
   const body = document.querySelector("#leaderboard-body");
   if (!body) return;
-  if (!entries.length) {
-    body.innerHTML = `<tr><td colspan="8" class="empty-state">No runners are registered yet.</td></tr>`;
+  if (!entries || !entries.length) {
+    body.innerHTML = `<tr><td colspan="8" class="empty-state">No runners in this category yet.</td></tr>`;
     return;
   }
   body.innerHTML = entries.map((entry) => `
@@ -700,15 +715,13 @@ function updateLeaderboard(entries) {
       <td>${escapeHTML(entry.gap)}</td>
     </tr>
   `).join("");
-  applyLeaderboardFilter(_activeLeaderboardCategory);
 }
 
 function applyLeaderboardFilter(category) {
   _activeLeaderboardCategory = category;
-  const rows = document.querySelectorAll("#leaderboard-body tr[data-category]");
-  rows.forEach((row) => {
-    row.hidden = category !== "" && row.dataset.category !== category;
-  });
+  if (_lastLeaderboardState) {
+    updateLeaderboard(_lastLeaderboardState);
+  }
 }
 
 function hydrateEventSettings() {

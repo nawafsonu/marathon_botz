@@ -139,13 +139,19 @@ type ImportResult struct {
 	Errors       []ImportError `json:"errors"`
 }
 
+type CategoryLeaderboard struct {
+	Category string           `json:"category"`
+	Entries  []LeaderboardEntry `json:"entries"`
+}
+
 type Snapshot struct {
-	Event        Event              `json:"event"`
-	Summary      Summary            `json:"summary"`
-	Checkpoints  []Checkpoint       `json:"checkpoints"`
-	Leaderboard  []LeaderboardEntry `json:"leaderboard"`
-	LiveFeed     []CheckpointLog    `json:"liveFeed"`
-	Participants []Participant      `json:"participants"`
+	Event                Event                `json:"event"`
+	Summary              Summary              `json:"summary"`
+	Checkpoints          []Checkpoint         `json:"checkpoints"`
+	Leaderboard          []LeaderboardEntry   `json:"leaderboard"`
+	CategoryLeaderboards []CategoryLeaderboard `json:"categoryLeaderboards"`
+	LiveFeed             []CheckpointLog      `json:"liveFeed"`
+	Participants         []Participant        `json:"participants"`
 }
 
 type State struct {
@@ -559,12 +565,13 @@ func (s *Service) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return Snapshot{
-		Event:        s.event,
-		Summary:      s.summaryLocked(),
-		Checkpoints:  append([]Checkpoint(nil), s.checkpoints...),
-		Leaderboard:  s.leaderboardLocked(),
-		LiveFeed:     s.recentLogsLocked(12),
-		Participants: append([]Participant(nil), s.participants...),
+		Event:                s.event,
+		Summary:              s.summaryLocked(),
+		Checkpoints:          append([]Checkpoint(nil), s.checkpoints...),
+		Leaderboard:          s.leaderboardLocked(),
+		CategoryLeaderboards: s.categoryLeaderboardsLocked(),
+		LiveFeed:             s.recentLogsLocked(12),
+		Participants:         append([]Participant(nil), s.participants...),
 	}
 }
 
@@ -716,6 +723,61 @@ func (s *Service) leaderboardLocked() []LeaderboardEntry {
 	for _, participant := range s.participants {
 		entries = append(entries, s.leaderboardEntryLocked(participant))
 	}
+	s.sortEntries(entries)
+	for i := range entries {
+		entries[i].Rank = i + 1
+		if i == 0 {
+			entries[i].Gap = "leader"
+			continue
+		}
+		entries[i].Gap = s.liveCheckpointGapLocked(entries[0], entries[i])
+	}
+	return entries
+}
+
+func (s *Service) categoryLeaderboardsLocked() []CategoryLeaderboard {
+	// Build per-category maps preserving the order from Event.Categories
+	categoryOrder := s.event.Categories
+	if len(categoryOrder) == 0 {
+		return nil
+	}
+	byCategory := make(map[string][]LeaderboardEntry, len(categoryOrder))
+	for _, cat := range categoryOrder {
+		byCategory[cat] = nil
+	}
+	for _, participant := range s.participants {
+		entry := s.leaderboardEntryLocked(participant)
+		cat := participant.Category
+		if _, known := byCategory[cat]; !known {
+			// participant has a category not in event.Categories — still include
+			byCategory[cat] = nil
+			categoryOrder = append(categoryOrder, cat)
+		}
+		byCategory[cat] = append(byCategory[cat], entry)
+	}
+
+	result := make([]CategoryLeaderboard, 0, len(categoryOrder))
+	for _, cat := range categoryOrder {
+		entries := byCategory[cat]
+		if len(entries) == 0 {
+			result = append(result, CategoryLeaderboard{Category: cat, Entries: []LeaderboardEntry{}})
+			continue
+		}
+		s.sortEntries(entries)
+		for i := range entries {
+			entries[i].Rank = i + 1
+			if i == 0 {
+				entries[i].Gap = "leader"
+				continue
+			}
+			entries[i].Gap = s.liveCheckpointGapLocked(entries[0], entries[i])
+		}
+		result = append(result, CategoryLeaderboard{Category: cat, Entries: entries})
+	}
+	return result
+}
+
+func (s *Service) sortEntries(entries []LeaderboardEntry) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		left, right := entries[i], entries[j]
 		if left.Status == RaceStatusDNF && right.Status != RaceStatusDNF {
@@ -740,16 +802,6 @@ func (s *Service) leaderboardLocked() []LeaderboardEntry {
 		}
 		return left.BibNumber < right.BibNumber
 	})
-
-	for i := range entries {
-		entries[i].Rank = i + 1
-		if i == 0 {
-			entries[i].Gap = "leader"
-			continue
-		}
-		entries[i].Gap = s.liveCheckpointGapLocked(entries[0], entries[i])
-	}
-	return entries
 }
 
 func (s *Service) liveCheckpointGapLocked(leader LeaderboardEntry, entry LeaderboardEntry) string {

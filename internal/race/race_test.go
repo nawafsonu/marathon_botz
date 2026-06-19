@@ -398,3 +398,96 @@ func mustLog(t *testing.T, svc *Service, bib string, checkpoint string, at time.
 		t.Fatalf("record %s at %s: %v", bib, checkpoint, err)
 	}
 }
+
+func TestCategoryLeaderboardsIndependentRanking(t *testing.T) {
+	event := seedEvent()
+	event.Categories = []string{"5 KM", "10 KM"}
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+	start := time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)
+
+	// Register runners in 5 KM category
+	runnerA, err := svc.RegisterParticipant("Runner A (5K)", "+91 90000 10001", "5 KM", "")
+	if err != nil {
+		t.Fatalf("register Runner A: %v", err)
+	}
+	runnerB, err := svc.RegisterParticipant("Runner B (5K)", "+91 90000 10002", "5 KM", "")
+	if err != nil {
+		t.Fatalf("register Runner B: %v", err)
+	}
+
+	// Register runners in 10 KM category
+	runnerC, err := svc.RegisterParticipant("Runner C (10K)", "+91 90000 10003", "10 KM", "")
+	if err != nil {
+		t.Fatalf("register Runner C: %v", err)
+	}
+	runnerD, err := svc.RegisterParticipant("Runner D (10K)", "+91 90000 10004", "10 KM", "")
+	if err != nil {
+		t.Fatalf("register Runner D: %v", err)
+	}
+
+	// Log checkpoints to establish leaders and rankings
+	// For 5 KM: Runner A is ahead of Runner B
+	mustLog(t, svc, runnerA.BibNumber, "start", start)
+	mustLog(t, svc, runnerA.BibNumber, "cp1", start.Add(20*time.Minute))
+
+	mustLog(t, svc, runnerB.BibNumber, "start", start)
+	mustLog(t, svc, runnerB.BibNumber, "cp1", start.Add(25*time.Minute))
+
+	// For 10 KM: Runner D is ahead of Runner C (C started CP1 later than D)
+	mustLog(t, svc, runnerC.BibNumber, "start", start)
+	mustLog(t, svc, runnerC.BibNumber, "cp1", start.Add(30*time.Minute))
+
+	mustLog(t, svc, runnerD.BibNumber, "start", start)
+	mustLog(t, svc, runnerD.BibNumber, "cp1", start.Add(28*time.Minute))
+
+	// Get Snapshot & verify CategoryLeaderboards
+	snapshot := svc.Snapshot()
+	catBoards := snapshot.CategoryLeaderboards
+	if len(catBoards) != 2 {
+		t.Fatalf("expected 2 category leaderboards, got %d", len(catBoards))
+	}
+
+	// Check 5 KM leaderboard
+	var board5KM CategoryLeaderboard
+	var board10KM CategoryLeaderboard
+	for _, cb := range catBoards {
+		if cb.Category == "5 KM" {
+			board5KM = cb
+		} else if cb.Category == "10 KM" {
+			board10KM = cb
+		}
+	}
+
+	if len(board5KM.Entries) != 2 {
+		t.Fatalf("expected 2 entries in 5 KM leaderboard, got %d", len(board5KM.Entries))
+	}
+	if board5KM.Entries[0].BibNumber != runnerA.BibNumber {
+		t.Fatalf("expected Runner A to lead 5 KM, got %s", board5KM.Entries[0].BibNumber)
+	}
+	if board5KM.Entries[0].Rank != 1 || board5KM.Entries[0].Gap != "leader" {
+		t.Fatalf("unexpected rank/gap for 5 KM leader: rank=%d gap=%s", board5KM.Entries[0].Rank, board5KM.Entries[0].Gap)
+	}
+	if board5KM.Entries[1].BibNumber != runnerB.BibNumber {
+		t.Fatalf("expected Runner B to be second in 5 KM, got %s", board5KM.Entries[1].BibNumber)
+	}
+	if board5KM.Entries[1].Rank != 2 || board5KM.Entries[1].Gap != "+5m 00s @ CP1" {
+		t.Fatalf("unexpected rank/gap for 5 KM second: rank=%d gap=%s", board5KM.Entries[1].Rank, board5KM.Entries[1].Gap)
+	}
+
+	// Check 10 KM leaderboard
+	if len(board10KM.Entries) != 2 {
+		t.Fatalf("expected 2 entries in 10 KM leaderboard, got %d", len(board10KM.Entries))
+	}
+	if board10KM.Entries[0].BibNumber != runnerD.BibNumber {
+		t.Fatalf("expected Runner D to lead 10 KM, got %s", board10KM.Entries[0].BibNumber)
+	}
+	if board10KM.Entries[0].Rank != 1 || board10KM.Entries[0].Gap != "leader" {
+		t.Fatalf("unexpected rank/gap for 10 KM leader: rank=%d gap=%s", board10KM.Entries[0].Rank, board10KM.Entries[0].Gap)
+	}
+	if board10KM.Entries[1].BibNumber != runnerC.BibNumber {
+		t.Fatalf("expected Runner C to be second in 10 KM, got %s", board10KM.Entries[1].BibNumber)
+	}
+	if board10KM.Entries[1].Rank != 2 || board10KM.Entries[1].Gap != "+2m 00s @ CP1" {
+		t.Fatalf("unexpected rank/gap for 10 KM second: rank=%d gap=%s", board10KM.Entries[1].Rank, board10KM.Entries[1].Gap)
+	}
+}
