@@ -41,14 +41,21 @@ func TestRecordCheckpointRejectsInvalidAndOutOfOrderEntries(t *testing.T) {
 	if _, err := svc.RecordCheckpoint("BIB-404", "start", "vol-1", now); err == nil {
 		t.Fatal("invalid bib was accepted")
 	}
-	if _, err := svc.RecordCheckpoint(runner.BibNumber, "cp2", "vol-1", now); err == nil {
-		t.Fatal("future checkpoint before previous checkpoint was accepted")
+	// Recording a future checkpoint as first scan (skipped start) is allowed under improved logic
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "cp2", "vol-1", now); err != nil {
+		t.Fatalf("recording cp2 as first checkpoint (skipped start) should be allowed: %v", err)
 	}
-	if _, err := svc.RecordCheckpoint(runner.BibNumber, "start", "vol-1", now); err != nil {
-		t.Fatalf("record start: %v", err)
+	// Recording start afterwards (sequence 1 <= last sequence 3) must be rejected
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "start", "vol-1", now.Add(time.Minute)); err == nil {
+		t.Fatal("recording start after cp2 (out of sequence order) should be rejected")
 	}
-	if _, err := svc.RecordCheckpoint(runner.BibNumber, "start", "vol-1", now.Add(2*time.Minute)); err == nil {
-		t.Fatal("duplicate checkpoint within prevention window was accepted")
+	// Chronological out-of-order (scan at finish with time before CP2 scan) must be rejected
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "finish", "vol-1", now.Add(-time.Minute)); err == nil {
+		t.Fatal("chronological out-of-order scan should be rejected")
+	}
+	// Duplicate checkpoint must be rejected
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "cp2", "vol-1", now.Add(2*time.Minute)); err == nil {
+		t.Fatal("duplicate checkpoint scan should be rejected")
 	}
 }
 
@@ -489,5 +496,60 @@ func TestCategoryLeaderboardsIndependentRanking(t *testing.T) {
 	}
 	if board10KM.Entries[1].Rank != 2 || board10KM.Entries[1].Gap != "+2m 00s @ CP1" {
 		t.Fatalf("unexpected rank/gap for 10 KM second: rank=%d gap=%s", board10KM.Entries[1].Rank, board10KM.Entries[1].Gap)
+	}
+}
+
+func TestLeaderboardRobustRankingAndFallbackGunTime(t *testing.T) {
+	event := seedEvent()
+	event.StartTime = time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+	start := event.StartTime
+
+	// 1. Runner A starts normally and finishes
+	runnerA := mustRegister(t, svc, "Runner A")
+	mustLog(t, svc, runnerA.BibNumber, "start", start)
+	mustLog(t, svc, runnerA.BibNumber, "cp1", start.Add(20*time.Minute))
+	mustLog(t, svc, runnerA.BibNumber, "finish", start.Add(50*time.Minute))
+
+	// 2. Runner B misses start mat, but registers cp1 and finish
+	runnerB := mustRegister(t, svc, "Runner B")
+	// Skips start mat scan
+	mustLog(t, svc, runnerB.BibNumber, "cp1", start.Add(22*time.Minute))
+	mustLog(t, svc, runnerB.BibNumber, "finish", start.Add(52*time.Minute))
+
+	// 3. Runner C starts, reaches cp1, but DNFs
+	runnerC := mustRegister(t, svc, "Runner C")
+	mustLog(t, svc, runnerC.BibNumber, "start", start)
+	mustLog(t, svc, runnerC.BibNumber, "cp1", start.Add(25*time.Minute))
+	if err := svc.MarkDNF(runnerC.BibNumber); err != nil {
+		t.Fatalf("mark dnf Runner C: %v", err)
+	}
+
+	// 4. Runner D is registered but never starts (DNS)
+	runnerD := mustRegister(t, svc, "Runner D")
+
+	// Get leaderboard
+	leaderboard := svc.Leaderboard()
+	if len(leaderboard) != 4 {
+		t.Fatalf("expected 4 leaderboard entries, got %d", len(leaderboard))
+	}
+
+	// Order should be: Runner A (finished), Runner B (finished), Runner C (DNF), Runner D (DNS/Registered)
+	if leaderboard[0].BibNumber != runnerA.BibNumber {
+		t.Fatalf("rank 1 expected Runner A, got %s", leaderboard[0].BibNumber)
+	}
+	if leaderboard[1].BibNumber != runnerB.BibNumber {
+		t.Fatalf("rank 2 expected Runner B, got %s", leaderboard[1].BibNumber)
+	}
+	if leaderboard[2].BibNumber != runnerC.BibNumber {
+		t.Fatalf("rank 3 expected Runner C, got %s", leaderboard[2].BibNumber)
+	}
+	if leaderboard[3].BibNumber != runnerD.BibNumber {
+		t.Fatalf("rank 4 expected Runner D, got %s", leaderboard[3].BibNumber)
+	}
+
+	// Verify Runner B finish/race duration fell back to Gun Time
+	if leaderboard[1].RaceTime != "52m 00s" {
+		t.Fatalf("expected Runner B fallback race time to be 52m 00s, got %s", leaderboard[1].RaceTime)
 	}
 }

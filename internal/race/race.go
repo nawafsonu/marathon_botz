@@ -624,22 +624,19 @@ func (s *Service) RunnerProfile(bibNumber string) (RunnerProfile, error) {
 func (s *Service) validateCheckpointLocked(bibNumber string, checkpoint Checkpoint, at time.Time) error {
 	logs := s.logsForBibLocked(bibNumber)
 	if len(logs) == 0 {
-		if checkpoint.Sequence != s.firstCheckpointSequence() {
-			return ErrOutOfOrderEntry
-		}
 		return nil
 	}
 
 	last := logs[len(logs)-1]
 	for _, log := range logs {
 		if log.Checkpoint.ID == checkpoint.ID {
-			if at.UTC().Sub(log.Timestamp.UTC()) <= s.duplicateWindow {
-				return ErrDuplicateEntry
-			}
 			return ErrDuplicateEntry
 		}
 	}
-	if checkpoint.Sequence != last.Checkpoint.Sequence+1 {
+	if checkpoint.Sequence <= last.Checkpoint.Sequence {
+		return ErrOutOfOrderEntry
+	}
+	if at.UTC().Before(last.Timestamp.UTC()) {
 		return ErrOutOfOrderEntry
 	}
 	return nil
@@ -780,15 +777,32 @@ func (s *Service) categoryLeaderboardsLocked() []CategoryLeaderboard {
 func (s *Service) sortEntries(entries []LeaderboardEntry) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		left, right := entries[i], entries[j]
-		if left.Status == RaceStatusDNF && right.Status != RaceStatusDNF {
-			return false
+
+		// 1. Group by "Start Status": runners who have started (LatestSequence > 0) vs those who haven't (LatestSequence == 0)
+		leftStarted := left.LatestSequence > 0
+		rightStarted := right.LatestSequence > 0
+		if leftStarted != rightStarted {
+			return leftStarted
 		}
-		if right.Status == RaceStatusDNF && left.Status != RaceStatusDNF {
-			return true
+
+		// If both haven't started, sort by BibNumber
+		if !leftStarted {
+			return left.BibNumber < right.BibNumber
 		}
+
+		// 2. Group by "DNF Status": non-DNF runners rank above DNF runners
+		leftDNF := left.Status == RaceStatusDNF
+		rightDNF := right.Status == RaceStatusDNF
+		if leftDNF != rightDNF {
+			return !leftDNF
+		}
+
+		// 3. For runners in the same group, rank by progress (higher is better)
 		if left.LatestSequence != right.LatestSequence {
 			return left.LatestSequence > right.LatestSequence
 		}
+
+		// 4. If at the same sequence, rank by arrival time (earlier is better)
 		leftTime := s.latestTimestampForBibLocked(left.BibNumber)
 		rightTime := s.latestTimestampForBibLocked(right.BibNumber)
 		if !leftTime.Equal(rightTime) {
@@ -800,6 +814,7 @@ func (s *Service) sortEntries(entries []LeaderboardEntry) {
 			}
 			return leftTime.Before(rightTime)
 		}
+
 		return left.BibNumber < right.BibNumber
 	})
 }
@@ -934,6 +949,9 @@ func (s *Service) raceDurationLocked(bibNumber string) (time.Duration, bool) {
 		if isFinish(log.Checkpoint, s.checkpoints) {
 			finish = log.Timestamp
 		}
+	}
+	if start.IsZero() && !s.event.StartTime.IsZero() {
+		start = s.event.StartTime
 	}
 	if start.IsZero() || finish.IsZero() {
 		return 0, false
