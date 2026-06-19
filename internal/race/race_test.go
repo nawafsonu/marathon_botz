@@ -10,11 +10,11 @@ import (
 func TestRegisterParticipantGeneratesSequentialBibs(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 
-	first, err := svc.RegisterParticipant("  Maya Iyer  ", "  +91 90000 10001  ", "")
+	first, err := svc.RegisterParticipant("  Maya Iyer  ", "  +91 90000 10001  ", "", "")
 	if err != nil {
 		t.Fatalf("register first participant: %v", err)
 	}
-	second, err := svc.RegisterParticipant("Arjun Nair", "+91 90000 10002", "pacemaker")
+	second, err := svc.RegisterParticipant("Arjun Nair", "+91 90000 10002", "", "pacemaker")
 	if err != nil {
 		t.Fatalf("register second participant: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestRegisterParticipantGeneratesSequentialBibs(t *testing.T) {
 
 func TestRecordCheckpointRejectsInvalidAndOutOfOrderEntries(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
-	runner, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "")
+	runner, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "", "")
 	if err != nil {
 		t.Fatalf("register participant: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestServicePersistsStateAfterMutation(t *testing.T) {
 		t.Fatalf("use store: %v", err)
 	}
 
-	participant, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "")
+	participant, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "", "")
 	if err != nil {
 		t.Fatalf("register participant: %v", err)
 	}
@@ -220,11 +220,11 @@ func TestStartRaceRecordsStartCheckpointForRegisteredRunners(t *testing.T) {
 	event := seedEvent()
 	event.Status = EventStatusUpcoming
 	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
-	first, err := svc.RegisterParticipant("First Runner", "+91 90000 10001", "")
+	first, err := svc.RegisterParticipant("First Runner", "+91 90000 10001", "", "")
 	if err != nil {
 		t.Fatalf("register first: %v", err)
 	}
-	second, err := svc.RegisterParticipant("Second Runner", "+91 90000 10002", "")
+	second, err := svc.RegisterParticipant("Second Runner", "+91 90000 10002", "", "")
 	if err != nil {
 		t.Fatalf("register second: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestImportParticipantsUsesMappedBibAndNameColumns(t *testing.T) {
 	if participants[0].BibNumber != "BIB-017" || participants[1].BibNumber != "BIB-018" {
 		t.Fatalf("imported bibs = %s, %s", participants[0].BibNumber, participants[1].BibNumber)
 	}
-	next, err := svc.RegisterParticipant("Next Runner", "+91 90000 10019", "")
+	next, err := svc.RegisterParticipant("Next Runner", "+91 90000 10019", "", "")
 	if err != nil {
 		t.Fatalf("register next: %v", err)
 	}
@@ -385,7 +385,7 @@ func seedCheckpoints() []Checkpoint {
 
 func mustRegister(t *testing.T, svc *Service, name string) Participant {
 	t.Helper()
-	participant, err := svc.RegisterParticipant(name, "+91 90000 10000", "")
+	participant, err := svc.RegisterParticipant(name, "+91 90000 10000", "", "")
 	if err != nil {
 		t.Fatalf("register %s: %v", name, err)
 	}

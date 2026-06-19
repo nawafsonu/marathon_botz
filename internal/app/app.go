@@ -128,7 +128,7 @@ func seedDemoRace(service *race.Service) {
 
 	checkpointIDs := []string{"start", "cp1", "cp2", "cp3", "finish"}
 	for _, runner := range runners {
-		participant, err := service.RegisterParticipant(runner.name, runner.phone, "")
+		participant, err := service.RegisterParticipant(runner.name, runner.phone, "", "")
 		if err != nil {
 			log.Printf("seed participant %s: %v", runner.name, err)
 			continue

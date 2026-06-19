@@ -67,7 +67,7 @@ func TestRegisterParticipantEndpointCreatesBib(t *testing.T) {
 
 func TestCheckpointEndpointRejectsOutOfOrderEntry(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
-	participant, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "")
+	participant, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "", "")
 	if err != nil {
 		t.Fatalf("register participant: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestCheckpointEndpointRejectsOutOfOrderEntry(t *testing.T) {
 
 func TestCheckpointEndpointAcceptsParticipantIDWithoutBib(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
-	participant, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "")
+	participant, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "", "")
 	if err != nil {
 		t.Fatalf("register participant: %v", err)
 	}
@@ -115,11 +115,11 @@ func TestCheckpointEndpointAcceptsParticipantIDWithoutBib(t *testing.T) {
 
 func TestCheckpointEndpointPrefersTypedBibOverSelectedRunner(t *testing.T) {
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
-	selected, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "")
+	selected, err := svc.RegisterParticipant("Priya Raman", "+91 99999 11111", "", "")
 	if err != nil {
 		t.Fatalf("register selected participant: %v", err)
 	}
-	other, err := svc.RegisterParticipant("Arjun Nair", "+91 99999 22222", "")
+	other, err := svc.RegisterParticipant("Arjun Nair", "+91 99999 22222", "", "")
 	if err != nil {
 		t.Fatalf("register other participant: %v", err)
 	}
@@ -916,11 +916,11 @@ func testService(t *testing.T) *race.Service {
 	t.Helper()
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
 	start := time.Date(2026, 1, 10, 6, 0, 0, 0, time.UTC)
-	slow, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "")
+	slow, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "", "")
 	if err != nil {
 		t.Fatalf("register slow: %v", err)
 	}
-	fast, err := svc.RegisterParticipant("Dev Rao", "+91 90000 10002", "")
+	fast, err := svc.RegisterParticipant("Dev Rao", "+91 90000 10002", "", "")
 	if err != nil {
 		t.Fatalf("register fast: %v", err)
 	}
@@ -965,7 +965,7 @@ func testCheckpoints() []race.Checkpoint {
 
 func mustRegisterWeb(t *testing.T, svc *race.Service, name string) race.Participant {
 	t.Helper()
-	participant, err := svc.RegisterParticipant(name, "+91 90000 10000", "")
+	participant, err := svc.RegisterParticipant(name, "+91 90000 10000", "", "")
 	if err != nil {
 		t.Fatalf("register %s: %v", name, err)
 	}

@@ -462,10 +462,11 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Name       string `json:"name"`
-		Location   string `json:"location"`
-		DistanceKM int    `json:"distanceKm"`
-		StartTime  string `json:"startTime"`
+		Name       string   `json:"name"`
+		Location   string   `json:"location"`
+		DistanceKM int      `json:"distanceKm"`
+		StartTime  string   `json:"startTime"`
+		Categories []string `json:"categories"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
@@ -485,6 +486,10 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusUnprocessableEntity, "start time must be an RFC3339 timestamp")
 		return
 	}
+	categories := filterCategories(input.Categories)
+	if len(categories) == 0 {
+		categories = defaultCategories(input.DistanceKM)
+	}
 	id := slugify(name)
 	event := race.Event{
 		ID:          id,
@@ -494,6 +499,7 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 		StartTime:   start,
 		Location:    strings.TrimSpace(input.Location),
 		DistanceKM:  input.DistanceKM,
+		Categories:  categories,
 		Status:      race.EventStatusUpcoming,
 	}
 	service := race.NewService(event, defaultCheckpoints(input.DistanceKM), nil, 10*time.Minute)
@@ -597,13 +603,14 @@ func (s *Server) registerParticipant(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name        string `json:"name"`
 		PhoneNumber string `json:"phoneNumber"`
+		Category    string `json:"category"`
 		Notes       string `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return
 	}
-	participant, err := service.RegisterParticipant(input.Name, input.PhoneNumber, input.Notes)
+	participant, err := service.RegisterParticipant(input.Name, input.PhoneNumber, input.Category, input.Notes)
 	if err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -691,10 +698,11 @@ func (s *Server) importRunners(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	rows, err := importer.ParseUpload(file, header.Filename, importer.Mapping{
-		BibColumn:   r.FormValue("bibColumn"),
-		NameColumn:  r.FormValue("nameColumn"),
-		PhoneColumn: r.FormValue("phoneColumn"),
-		NotesColumn: r.FormValue("notesColumn"),
+		BibColumn:      r.FormValue("bibColumn"),
+		NameColumn:     r.FormValue("nameColumn"),
+		PhoneColumn:    r.FormValue("phoneColumn"),
+		CategoryColumn: r.FormValue("categoryColumn"),
+		NotesColumn:    r.FormValue("notesColumn"),
 	})
 	if err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
@@ -1350,6 +1358,32 @@ func (s *Server) saveSessionsLocked() error {
 		builder.WriteString("\n")
 	}
 	return os.WriteFile(s.sessionPath, []byte(builder.String()), 0600)
+}
+
+func filterCategories(categories []string) []string {
+	seen := make(map[string]bool, len(categories))
+	result := make([]string, 0, len(categories))
+	for _, c := range categories {
+		c = strings.TrimSpace(c)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+func defaultCategories(distanceKM int) []string {
+	switch {
+	case distanceKM >= 42:
+		return []string{"5 KM", "11 KM", "21 KM", "42 KM"}
+	case distanceKM >= 21:
+		return []string{"5 KM", "11 KM", "21 KM"}
+	case distanceKM >= 11:
+		return []string{"5 KM", "11 KM"}
+	default:
+		return []string{fmt.Sprintf("%d KM", distanceKM)}
+	}
 }
 
 func defaultCheckpoints(distanceKM int) []race.Checkpoint {

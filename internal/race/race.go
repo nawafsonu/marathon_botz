@@ -49,6 +49,7 @@ type Event struct {
 	StartTime   time.Time   `json:"startTime"`
 	Location    string      `json:"location"`
 	DistanceKM  int         `json:"distanceKm"`
+	Categories  []string    `json:"categories"`
 	Status      EventStatus `json:"status"`
 }
 
@@ -64,6 +65,7 @@ type Participant struct {
 	BibNumber   string     `json:"bibNumber"`
 	Name        string     `json:"name"`
 	PhoneNumber string     `json:"phoneNumber"`
+	Category    string     `json:"category"`
 	Notes       string     `json:"notes"`
 	Status      RaceStatus `json:"status"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -83,6 +85,7 @@ type LeaderboardEntry struct {
 	Rank               int        `json:"rank"`
 	BibNumber          string     `json:"bibNumber"`
 	RunnerName         string     `json:"runnerName"`
+	Category           string     `json:"category"`
 	Status             RaceStatus `json:"status"`
 	LatestCheckpoint   string     `json:"latestCheckpoint"`
 	LatestSequence     int        `json:"latestSequence"`
@@ -121,6 +124,7 @@ type ImportParticipant struct {
 	BibNumber   string `json:"bibNumber"`
 	Name        string `json:"name"`
 	PhoneNumber string `json:"phoneNumber"`
+	Category    string `json:"category"`
 	Notes       string `json:"notes"`
 }
 
@@ -329,9 +333,10 @@ func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (
 	return checkpoint, nil
 }
 
-func (s *Service) RegisterParticipant(name, phone, notes string) (Participant, error) {
+func (s *Service) RegisterParticipant(name, phone, category, notes string) (Participant, error) {
 	name = strings.TrimSpace(name)
 	phone = strings.TrimSpace(phone)
+	category = strings.TrimSpace(category)
 	notes = strings.TrimSpace(notes)
 	if name == "" || phone == "" {
 		return Participant{}, ErrInvalidParticipant
@@ -344,6 +349,7 @@ func (s *Service) RegisterParticipant(name, phone, notes string) (Participant, e
 		BibNumber:   fmt.Sprintf("BIB-%03d", s.nextParticipant),
 		Name:        name,
 		PhoneNumber: phone,
+		Category:    category,
 		Notes:       notes,
 		Status:      RaceStatusRegistered,
 		CreatedAt:   time.Now().UTC(),
@@ -514,6 +520,7 @@ func (s *Service) importParticipantLocked(row ImportParticipant) (Participant, e
 		BibNumber:   bib,
 		Name:        name,
 		PhoneNumber: strings.TrimSpace(row.PhoneNumber),
+		Category:    strings.TrimSpace(row.Category),
 		Notes:       strings.TrimSpace(row.Notes),
 		Status:      RaceStatusRegistered,
 		CreatedAt:   time.Now().UTC(),
@@ -794,6 +801,7 @@ func (s *Service) leaderboardEntryLocked(participant Participant) LeaderboardEnt
 	return LeaderboardEntry{
 		BibNumber:          participant.BibNumber,
 		RunnerName:         participant.Name,
+		Category:           participant.Category,
 		Status:             participant.Status,
 		LatestCheckpoint:   latestCheckpoint,
 		LatestSequence:     latestSequence,

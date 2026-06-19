@@ -118,6 +118,15 @@
                 <input name="startTime" type="datetime-local" required>
               </label>
             </div>
+            <fieldset class="category-fieldset">
+              <legend>Distance categories (participants can register for these)</legend>
+              <div class="category-checkbox-grid">
+                <label class="category-check"><input type="checkbox" name="categories" value="5 KM" checked> 5 KM Fun Run</label>
+                <label class="category-check"><input type="checkbox" name="categories" value="11 KM"> 11 KM</label>
+                <label class="category-check"><input type="checkbox" name="categories" value="21 KM"> 21 KM Half Marathon</label>
+                <label class="category-check"><input type="checkbox" name="categories" value="42 KM"> 42 KM Full Marathon</label>
+              </div>
+            </fieldset>
             <button type="submit">Create marathon</button>
             <p class="form-status" id="event-create-status" role="status"></p>
           </form>
@@ -176,6 +185,16 @@
               <input name="phoneNumber" autocomplete="tel" placeholder="+91 90000 10000" required>
             </label>
             <label>
+              Category
+              <select name="category" id="dashboard-category-select">
+                {{range $.Snapshot.Event.Categories}}
+                  <option value="{{.}}">{{.}}</option>
+                {{else}}
+                  <option value="">No categories</option>
+                {{end}}
+              </select>
+            </label>
+            <label>
               Notes
               <input name="notes" placeholder="Optional">
             </label>
@@ -210,6 +229,10 @@
               <label>
                 Phone column
                 <input name="phoneColumn" placeholder="Phone">
+              </label>
+              <label>
+                Category column
+                <input name="categoryColumn" placeholder="Category">
               </label>
               <label>
                 Notes column
@@ -294,6 +317,12 @@
           </div>
           <span class="completion-rate"><span data-stat="completion">{{.Snapshot.Summary.CourseProgress}}</span>% course progress</span>
         </div>
+        <div class="leaderboard-category-tabs" id="leaderboard-tabs" role="tablist">
+          <button class="tab-btn active" data-category="" role="tab" aria-selected="true">All</button>
+          {{range .Snapshot.Event.Categories}}
+            <button class="tab-btn" data-category="{{.}}" role="tab" aria-selected="false">{{.}}</button>
+          {{end}}
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -301,6 +330,7 @@
                 <th>Rank</th>
                 <th>Bib</th>
                 <th>Runner</th>
+                <th>Category</th>
                 <th>Status</th>
                 <th>Latest Checkpoint</th>
                 <th>Finish Time</th>
@@ -309,17 +339,18 @@
             </thead>
             <tbody id="leaderboard-body">
               {{range .Snapshot.Leaderboard}}
-                <tr>
+                <tr data-category="{{.Category}}">
                   <td class="rank">#{{.Rank}}</td>
                   <td>{{.BibNumber}}</td>
                   <td><a href="{{$.BasePath}}/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
+                  <td><span class="category-badge">{{if .Category}}{{.Category}}{{else}}—{{end}}</span></td>
                   <td>{{.Status}}</td>
                   <td>{{.LatestCheckpoint}}</td>
                   <td>{{.FinishTime}}</td>
                   <td>{{.Gap}}</td>
                 </tr>
               {{else}}
-                <tr><td colspan="7" class="empty-state">No runners are registered yet.</td></tr>
+                <tr><td colspan="8" class="empty-state">No runners are registered yet.</td></tr>
               {{end}}
             </tbody>
           </table>

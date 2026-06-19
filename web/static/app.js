@@ -388,9 +388,10 @@ registrationForm?.addEventListener("submit", async (event) => {
     const participant = await postJSON(`${basePath}/api/participants`, {
       name: form.get("name"),
       phoneNumber: form.get("phoneNumber"),
+      category: form.get("category") || "",
       notes: form.get("notes"),
     });
-    setStatus(registrationStatus, `${participant.name} registered as ${participant.bibNumber}.`, "success");
+    setStatus(registrationStatus, `${participant.name} registered as ${participant.bibNumber} (${participant.category || "no category"}).`, "success");
     registrationForm.reset();
     await refreshState();
   } catch (error) {
@@ -431,6 +432,7 @@ eventSettingsForm?.addEventListener("submit", async (event) => {
 eventCreateForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(eventCreateForm);
+  const categories = form.getAll("categories").filter(Boolean);
   setStatus(eventCreateStatus, "Creating marathon...");
   try {
     const created = await postJSON("/api/events", {
@@ -438,6 +440,7 @@ eventCreateForm?.addEventListener("submit", async (event) => {
       location: form.get("location"),
       distanceKm: Number(form.get("distanceKm")),
       startTime: new Date(form.get("startTime")).toISOString(),
+      categories,
     });
     setStatus(eventCreateStatus, `${created.name} created.`, "success");
     window.location.href = `/events/${encodeURIComponent(created.id)}`;
@@ -676,24 +679,36 @@ function updateFeed(feed) {
   `).join("");
 }
 
+let _activeLeaderboardCategory = "";
+
 function updateLeaderboard(entries) {
   const body = document.querySelector("#leaderboard-body");
   if (!body) return;
   if (!entries.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-state">No runners are registered yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" class="empty-state">No runners are registered yet.</td></tr>`;
     return;
   }
   body.innerHTML = entries.map((entry) => `
-    <tr>
+    <tr data-category="${escapeHTML(entry.category || "")}">
       <td class="rank">#${entry.rank}</td>
       <td>${escapeHTML(entry.bibNumber)}</td>
       <td><a href="${basePath}/runners/${encodeURIComponent(entry.bibNumber)}">${escapeHTML(entry.runnerName)}</a></td>
+      <td><span class="category-badge">${escapeHTML(entry.category || "—")}</span></td>
       <td>${escapeHTML(entry.status)}</td>
       <td>${escapeHTML(entry.latestCheckpoint)}</td>
       <td>${escapeHTML(entry.finishTime)}</td>
       <td>${escapeHTML(entry.gap)}</td>
     </tr>
   `).join("");
+  applyLeaderboardFilter(_activeLeaderboardCategory);
+}
+
+function applyLeaderboardFilter(category) {
+  _activeLeaderboardCategory = category;
+  const rows = document.querySelectorAll("#leaderboard-body tr[data-category]");
+  rows.forEach((row) => {
+    row.hidden = category !== "" && row.dataset.category !== category;
+  });
 }
 
 function hydrateEventSettings() {
@@ -726,4 +741,18 @@ function escapeHTML(value) {
 
 hydrateEventSettings();
 hydrateDisplayedEventTime();
+
+// Category filter tabs (leaderboard)
+document.querySelectorAll("#leaderboard-tabs .tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#leaderboard-tabs .tab-btn").forEach((b) => {
+      b.classList.remove("active");
+      b.setAttribute("aria-selected", "false");
+    });
+    btn.classList.add("active");
+    btn.setAttribute("aria-selected", "true");
+    applyLeaderboardFilter(btn.dataset.category || "");
+  });
+});
+
 setInterval(refreshState, 5000);

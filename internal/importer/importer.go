@@ -14,10 +14,11 @@ import (
 )
 
 type Mapping struct {
-	BibColumn   string
-	NameColumn  string
-	PhoneColumn string
-	NotesColumn string
+	BibColumn      string
+	NameColumn     string
+	PhoneColumn    string
+	CategoryColumn string
+	NotesColumn    string
 }
 
 func ParseUpload(file multipart.File, filename string, mapping Mapping) ([]race.ImportParticipant, error) {
@@ -69,6 +70,7 @@ func rowsToParticipants(rows [][]string, mapping Mapping) ([]race.ImportParticip
 	}
 	bibIndex, _ := columnIndex(headers, mapping.BibColumn)
 	phoneIndex, _ := columnIndex(headers, mapping.PhoneColumn)
+	categoryIndex, _ := columnIndex(headers, mapping.CategoryColumn)
 	notesIndex, _ := columnIndex(headers, mapping.NotesColumn)
 
 	participants := make([]race.ImportParticipant, 0, len(rows)-1)
@@ -76,6 +78,7 @@ func rowsToParticipants(rows [][]string, mapping Mapping) ([]race.ImportParticip
 		name := cell(row, nameIndex)
 		bib := cell(row, bibIndex)
 		phone := cell(row, phoneIndex)
+		category := cell(row, categoryIndex)
 		notes := cell(row, notesIndex)
 		if strings.TrimSpace(name) == "" && strings.TrimSpace(bib) == "" {
 			continue
@@ -84,6 +87,7 @@ func rowsToParticipants(rows [][]string, mapping Mapping) ([]race.ImportParticip
 			BibNumber:   bib,
 			Name:        name,
 			PhoneNumber: phone,
+			Category:    category,
 			Notes:       notes,
 		})
 	}
