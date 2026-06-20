@@ -33,7 +33,7 @@ func Run() {
 }
 
 func buildServer() (*web.Server, func()) {
-	duplicateWindow := 10 * time.Minute
+	duplicateWindow := 1 * time.Minute
 	authManager, err := auth.NewManager(env("LOGIN_CREDENTIALS_FILE", "logincred.txt"))
 	if err != nil {
 		log.Printf("Local login credentials unavailable; auth disabled: %v", err)
