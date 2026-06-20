@@ -63,10 +63,11 @@ type Event struct {
 }
 
 type Checkpoint struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Sequence   int     `json:"sequence"`
-	DistanceKM float64 `json:"distanceKm"`
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	Sequence      int     `json:"sequence"`
+	DistanceKM    float64 `json:"distanceKm"`
+	StationStatus string  `json:"stationStatus,omitempty" bson:"-"` // upcoming | active | completed
 }
 
 type Participant struct {
@@ -338,6 +339,73 @@ func (s *Service) hasCategoryLocked(category string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) UpdateCheckpointDistance(id string, distanceKM float64) (Checkpoint, error) {
+	id = strings.TrimSpace(id)
+	if distanceKM < 0 {
+		return Checkpoint{}, errors.New("checkpoint distance cannot be negative")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cp, exists := s.checkpointByID[id]
+	if !exists {
+		return Checkpoint{}, ErrInvalidCheckpoint
+	}
+	cp.DistanceKM = distanceKM
+	for i := range s.checkpoints {
+		if s.checkpoints[i].ID == id {
+			s.checkpoints[i] = cp
+		}
+	}
+	s.checkpointByID[id] = cp
+	state := s.stateLocked()
+	store := s.store
+	go persist(store, state)
+	return cp, nil
+}
+
+func (s *Service) DeleteCheckpoint(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "start" || id == "finish" {
+		return errors.New("Start and Finish checkpoints cannot be deleted")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.checkpointByID[id]; !exists {
+		return ErrInvalidCheckpoint
+	}
+	for _, log := range s.logs {
+		if log.Checkpoint.ID == id {
+			return fmt.Errorf("checkpoint %s has already been used and cannot be deleted", id)
+		}
+	}
+	delete(s.checkpointByID, id)
+	filtered := s.checkpoints[:0]
+	for _, cp := range s.checkpoints {
+		if cp.ID != id {
+			filtered = append(filtered, cp)
+		}
+	}
+	s.checkpoints = filtered
+	state := s.stateLocked()
+	store := s.store
+	go persist(store, state)
+	return nil
+}
+
+func (s *Service) CompleteEvent() error {
+	s.mu.Lock()
+	s.event.Status = EventStatusCompleted
+	state := s.stateLocked()
+	store := s.store
+	s.mu.Unlock()
+	persist(store, state)
+	return nil
 }
 
 func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (Checkpoint, error) {

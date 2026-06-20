@@ -27,19 +27,23 @@ import (
 )
 
 type Server struct {
-	mux           *http.ServeMux
-	service       *race.Service
-	projects      *projectRegistry
-	projectStore  race.Store
-	templates     *template.Template
-	staticDir     string
-	authManager   *auth.Manager
-	analyzer      *analysis.Client
-	chestReader   *chestreader.Client
-	chestReaderMu sync.RWMutex
-	sessionMu     sync.RWMutex
-	sessionPath   string
-	sessions      map[string]sessionRecord
+	mux            *http.ServeMux
+	service        *race.Service
+	projects       *projectRegistry
+	projectStore   race.Store
+	templates      *template.Template
+	staticDir      string
+	authManager    *auth.Manager
+	analyzer       *analysis.Client
+	chestReader    *chestreader.Client
+	chestReaderMu  sync.RWMutex
+	sessionMu      sync.RWMutex
+	sessionPath    string
+	sessions       map[string]sessionRecord
+	// stationStatus tracks per-checkpoint station state (in-memory, not persisted).
+	// Key format: "eventID:checkpointID", value: "upcoming" | "active" | "completed"
+	stationStatus  map[string]string
+	stationMu      sync.RWMutex
 }
 
 type projectRegistry struct {
@@ -144,11 +148,12 @@ func WithChestReader(reader *chestreader.Client) Option {
 
 func NewServer(service *race.Service, options ...Option) *Server {
 	server := &Server{
-		mux:       http.NewServeMux(),
-		service:   service,
-		projects:  newProjectRegistry(service),
-		staticDir: "web/static",
-		sessions:  make(map[string]sessionRecord),
+		mux:           http.NewServeMux(),
+		service:       service,
+		projects:      newProjectRegistry(service),
+		staticDir:     "web/static",
+		sessions:      make(map[string]sessionRecord),
+		stationStatus: make(map[string]string),
 	}
 	for _, option := range options {
 		option(server)
@@ -201,6 +206,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /events/{eventID}/api/start-race", s.startRace)
 	s.mux.HandleFunc("POST /api/checkpoints", s.addCheckpoint)
 	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoints", s.addCheckpoint)
+	s.mux.HandleFunc("PATCH /api/checkpoints/{checkpointID}", s.updateCheckpoint)
+	s.mux.HandleFunc("PATCH /events/{eventID}/api/checkpoints/{checkpointID}", s.updateCheckpoint)
+	s.mux.HandleFunc("POST /api/checkpoints/{checkpointID}/delete", s.deleteCheckpoint)
+	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoints/{checkpointID}/delete", s.deleteCheckpoint)
+	s.mux.HandleFunc("POST /api/checkpoints/{checkpointID}/station", s.setStationStatus)
+	s.mux.HandleFunc("POST /events/{eventID}/api/checkpoints/{checkpointID}/station", s.setStationStatus)
 	s.mux.HandleFunc("POST /api/participants", s.registerParticipant)
 	s.mux.HandleFunc("POST /events/{eventID}/api/participants", s.registerParticipant)
 	s.mux.HandleFunc("POST /api/participants/{bib}/delete", s.deleteParticipant)
@@ -839,7 +850,18 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, service.Snapshot())
+	snapshot := service.Snapshot()
+	// Inject in-memory station status into each checkpoint.
+	eventID := service.Event().ID
+	s.stationMu.RLock()
+	for i, cp := range snapshot.Checkpoints {
+		key := eventID + ":" + cp.ID
+		if status, ok := s.stationStatus[key]; ok {
+			snapshot.Checkpoints[i].StationStatus = status
+		}
+	}
+	s.stationMu.RUnlock()
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *Server) registerParticipant(w http.ResponseWriter, r *http.Request) {
@@ -1002,6 +1024,104 @@ func (s *Server) addCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, checkpoint)
+}
+
+func (s *Server) updateCheckpoint(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	checkpointID := strings.TrimSpace(r.PathValue("checkpointID"))
+	var input struct {
+		DistanceKM float64 `json:"distanceKm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
+		return
+	}
+	checkpoint, err := service.UpdateCheckpointDistance(checkpointID, input.DistanceKM)
+	if err != nil {
+		writeProblem(w, statusForRaceError(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, checkpoint)
+}
+
+func (s *Server) deleteCheckpoint(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	checkpointID := strings.TrimSpace(r.PathValue("checkpointID"))
+	if err := service.DeleteCheckpoint(checkpointID); err != nil {
+		writeProblem(w, statusForRaceError(err), err.Error())
+		return
+	}
+	// Clean up station status for deleted checkpoint.
+	eventID := service.Event().ID
+	s.stationMu.Lock()
+	delete(s.stationStatus, eventID+":"+checkpointID)
+	s.stationMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) setStationStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	checkpointID := strings.TrimSpace(r.PathValue("checkpointID"))
+	var input struct {
+		Status string `json:"status"` // upcoming | active | completed
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
+		return
+	}
+	status := strings.TrimSpace(input.Status)
+	if status != "upcoming" && status != "active" && status != "completed" {
+		writeProblem(w, http.StatusBadRequest, "status must be upcoming, active, or completed")
+		return
+	}
+
+	// Validate checkpoint exists.
+	checkpoints := service.Checkpoints()
+	var found *race.Checkpoint
+	for i := range checkpoints {
+		if checkpoints[i].ID == checkpointID {
+			found = &checkpoints[i]
+			break
+		}
+	}
+	if found == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	eventID := service.Event().ID
+	s.stationMu.Lock()
+	s.stationStatus[eventID+":"+checkpointID] = status
+	s.stationMu.Unlock()
+
+	// If the Finish checkpoint is closed → auto-complete the event.
+	isFinish := found.ID == "finish" || (len(checkpoints) > 0 && found.Sequence == checkpoints[len(checkpoints)-1].Sequence)
+	if isFinish && status == "completed" {
+		_ = service.CompleteEvent()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"checkpointId": checkpointID,
+		"status":       status,
+	})
 }
 
 func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {

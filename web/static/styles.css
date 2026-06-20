@@ -689,14 +689,126 @@ button:disabled {
 
 .checkpoint-list {
   margin-top: 1rem;
-  max-height: 14rem;
+  max-height: 20rem;
   overflow: auto;
+}
+
+/* Admin checkpoint rows */
+.checkpoint-list-admin {
+  max-height: none;
+  gap: 0.4rem;
+}
+
+.checkpoint-row {
+  display: grid;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.7rem 0;
+}
+
+.checkpoint-row-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.checkpoint-row-info .cp-km {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.checkpoint-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.cp-btn {
+  min-height: 2.2rem;
+  padding: 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+/* Station dot: small coloured indicator */
+.station-dot {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.station-dot.station-upcoming  { background: var(--muted); }
+.station-dot.station-active    { background: var(--lime); box-shadow: 0 0 0 3px rgba(182, 255, 59, 0.25); animation: stationPulse 1.4s ease-in-out infinite; }
+.station-dot.station-completed { background: #444; }
+
+@keyframes stationPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(182, 255, 59, 0.25); }
+  50%       { box-shadow: 0 0 0 6px rgba(182, 255, 59, 0.10); }
+}
+
+/* Inline KM edit form */
+.cp-edit-form {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.cp-edit-form label {
+  font-size: 0.8rem;
+}
+
+.cp-edit-form input {
+  min-height: 2.6rem;
+}
+
+.cp-edit-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* Winner banner */
+.winner-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.2rem;
+  margin-bottom: 0.75rem;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(255, 200, 30, 0.18), rgba(255, 140, 0, 0.10) 60%, transparent);
+  border: 1px solid rgba(255, 200, 30, 0.45);
+  color: #ffd84a;
+  font-size: 1.05rem;
+  font-weight: 800;
+  animation: winnerGlow 2.5s ease-in-out infinite;
+}
+
+@keyframes winnerGlow {
+  0%, 100% { border-color: rgba(255, 200, 30, 0.45); }
+  50%       { border-color: rgba(255, 200, 30, 0.9); }
+}
+
+/* Finish-line entries in the live feed */
+.feed-finish {
+  border-left: 3px solid #ffd84a;
+  padding-left: 0.5rem;
+}
+
+.feed-finish strong {
+  color: #ffd84a;
 }
 
 .empty-state {
   color: var(--muted);
   font-weight: 700;
 }
+
 
 .ai-panel {
   border-color: rgba(154, 255, 89, 0.22);

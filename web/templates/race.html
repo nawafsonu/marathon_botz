@@ -186,7 +186,7 @@
           <div class="section-heading">
             <div>
               <h2>Manage Checkpoints</h2>
-              <p>Add race checkpoints in course order</p>
+              <p>Add checkpoints · edit KM · open/close stations</p>
             </div>
           </div>
           <form id="checkpoint-manager-form" class="stacked-form compact">
@@ -213,16 +213,40 @@
                 <input name="sequence" type="number" min="2" step="1" placeholder="5" required>
               </label>
               <label>
-                Distance marker
+                Distance (KM)
                 <input name="distanceKm" type="number" min="0" step="0.1" placeholder="30">
               </label>
             </div>
             <button type="submit">Add checkpoint</button>
             <p class="form-status" id="checkpoint-manager-status" role="status"></p>
           </form>
-          <ol id="checkpoint-list" class="checkpoint-list">
+          <ol id="checkpoint-list" class="checkpoint-list checkpoint-list-admin">
             {{range .Snapshot.Checkpoints}}
-              <li><strong>{{.Name}}</strong><span>{{.Sequence}} · {{printf "%.1f" .DistanceKM}} KM</span></li>
+              <li class="checkpoint-row" data-cp-id="{{.ID}}" data-cp-is-start="{{eq .Sequence 1}}" data-cp-is-finish="{{eq .Name "Finish"}}">
+                <div class="checkpoint-row-info">
+                  <strong>{{.Name}}</strong>
+                  <span class="cp-km" data-cp-km="{{printf "%.1f" .DistanceKM}}">{{printf "%.1f" .DistanceKM}} KM</span>
+                </div>
+                <div class="checkpoint-row-actions">
+                  <span class="station-dot station-{{if .StationStatus}}{{.StationStatus}}{{else}}upcoming{{end}}" title="Station status"></span>
+                  <button type="button" class="cp-btn cp-open-btn secondary-button" data-cp-action="open" title="Open station">Open</button>
+                  <button type="button" class="cp-btn cp-close-btn secondary-button" data-cp-action="close" title="Close station">Close</button>
+                  <button type="button" class="cp-btn cp-edit-btn secondary-button" data-cp-action="edit" title="Edit KM">Edit KM</button>
+                  <button type="button" class="cp-btn cp-delete-btn inline-danger secondary-button" data-cp-action="delete" title="Delete checkpoint">✕</button>
+                </div>
+                <form class="cp-edit-form" hidden>
+                  <label>
+                    KM distance
+                    <input type="number" min="0" step="0.1" class="cp-km-input" value="{{printf "%.1f" .DistanceKM}}" required>
+                  </label>
+                  <div class="cp-edit-actions">
+                    <button type="submit" class="secondary-button">Save</button>
+                    <button type="button" class="cp-cancel-btn secondary-button muted-button">Cancel</button>
+                  </div>
+                </form>
+              </li>
+            {{else}}
+              <li class="empty-state">No checkpoints defined yet.</li>
             {{end}}
           </ol>
         </section>
@@ -232,14 +256,19 @@
           <div class="section-heading">
             <div>
               <h2>Recent Entries</h2>
-              <p>Newest chest-number submissions first</p>
+              <p>Newest check-ins first · 🏆 winner on finish</p>
             </div>
           </div>
+          <div id="winner-banner" class="winner-banner" hidden></div>
           <ol id="live-feed" class="feed-list">
             {{range .Snapshot.LiveFeed}}
-              <li><strong>{{.Participant.BibNumber}}</strong><span>{{.Checkpoint.Name}}</span><time>{{.Timestamp.Format "15:04:05"}}</time></li>
+              <li {{if eq .Checkpoint.Name "Finish"}}class="feed-finish"{{end}}>
+                <strong>{{.Participant.BibNumber}}</strong>
+                <span>{{if .Participant.Name}}{{.Participant.Name}} · {{end}}{{.Checkpoint.Name}}</span>
+                <time>{{.Timestamp.Format "15:04:05"}}</time>
+              </li>
             {{else}}
-              <li class="empty-state">No runners have reached this checkpoint yet.</li>
+              <li class="empty-state">No runners have reached a checkpoint yet.</li>
             {{end}}
           </ol>
         </section>

@@ -723,7 +723,7 @@ async function refreshState() {
   updateStats(state.summary);
   updateCheckpoints(state.checkpoints);
   updateParticipants(state.participants);
-  updateFeed(state.liveFeed);
+  updateFeed(state.liveFeed, state);
   updateLeaderboard(state);
 }
 
@@ -774,12 +774,47 @@ function updateStats(summary) {
 function updateCheckpoints(checkpoints) {
   const list = document.querySelector("#checkpoint-list");
   if (list) {
-    list.innerHTML = checkpoints.map((checkpoint) => `
-      <li>
-        <strong>${escapeHTML(checkpoint.name)}</strong>
-        <span>${checkpoint.sequence} · ${Number(checkpoint.distanceKm).toFixed(1)} KM</span>
-      </li>
-    `).join("");
+    const isAdmin = list.classList.contains("checkpoint-list-admin");
+    if (isAdmin) {
+      // Admin view: rich rows with edit/open/close/delete.
+      list.innerHTML = checkpoints.length ? checkpoints.map((cp) => {
+        const stationClass = cp.stationStatus || "upcoming";
+        const isStart = cp.id === "start";
+        const isFinish = cp.id === "finish" || (checkpoints.length > 0 && cp.sequence === checkpoints[checkpoints.length - 1].sequence);
+        return `
+          <li class="checkpoint-row" data-cp-id="${escapeHTML(cp.id)}" data-cp-is-finish="${isFinish}">
+            <div class="checkpoint-row-info">
+              <strong>${escapeHTML(cp.name)}</strong>
+              <span class="cp-km" data-cp-km="${Number(cp.distanceKm).toFixed(1)}">${Number(cp.distanceKm).toFixed(1)} KM</span>
+            </div>
+            <div class="checkpoint-row-actions">
+              <span class="station-dot station-${escapeHTML(stationClass)}" title="${escapeHTML(stationClass)}"></span>
+              <button type="button" class="cp-btn secondary-button" data-cp-action="open">Open</button>
+              <button type="button" class="cp-btn secondary-button" data-cp-action="close">Close</button>
+              <button type="button" class="cp-btn secondary-button" data-cp-action="edit">Edit KM</button>
+              ${!isStart && !isFinish ? `<button type="button" class="cp-btn inline-danger secondary-button" data-cp-action="delete">✕</button>` : ""}
+            </div>
+            <form class="cp-edit-form" hidden>
+              <label>KM distance
+                <input type="number" min="0" step="0.1" class="cp-km-input" value="${Number(cp.distanceKm).toFixed(1)}" required>
+              </label>
+              <div class="cp-edit-actions">
+                <button type="submit" class="secondary-button">Save</button>
+                <button type="button" class="cp-cancel-btn secondary-button muted-button">Cancel</button>
+              </div>
+            </form>
+          </li>
+        `;
+      }).join("") : `<li class="empty-state">No checkpoints defined yet.</li>`;
+      wireCheckpointRowActions(list);
+    } else {
+      list.innerHTML = checkpoints.map((checkpoint) => `
+        <li>
+          <strong>${escapeHTML(checkpoint.name)}</strong>
+          <span>${checkpoint.sequence} · ${Number(checkpoint.distanceKm).toFixed(1)} KM</span>
+        </li>
+      `).join("");
+    }
   }
   const select = checkpointForm?.elements.namedItem("checkpointId");
   if (select) {
@@ -791,6 +826,76 @@ function updateCheckpoints(checkpoints) {
     if (selected && [...select.options].some((option) => option.value === selected)) {
       select.value = selected;
     }
+  }
+}
+
+function wireCheckpointRowActions(list) {
+  list.querySelectorAll(".checkpoint-row").forEach((row) => {
+    const cpId = row.dataset.cpId;
+    const editForm = row.querySelector(".cp-edit-form");
+    const actionsDiv = row.querySelector(".checkpoint-row-actions");
+    const kmSpan = row.querySelector(".cp-km");
+
+    row.querySelector("[data-cp-action='edit']")?.addEventListener("click", () => {
+      editForm.hidden = false;
+      actionsDiv.hidden = true;
+      editForm.querySelector(".cp-km-input")?.focus();
+    });
+    row.querySelector(".cp-cancel-btn")?.addEventListener("click", () => {
+      editForm.hidden = true;
+      actionsDiv.hidden = false;
+    });
+    editForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const km = Number(editForm.querySelector(".cp-km-input").value);
+      try {
+        const updated = await fetch(`${basePath}/api/checkpoints/${encodeURIComponent(cpId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ distanceKm: km }),
+        }).then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(b.error); return b; });
+        kmSpan.textContent = `${Number(updated.distanceKm).toFixed(1)} KM`;
+        editForm.hidden = true;
+        actionsDiv.hidden = false;
+        setStatus(checkpointManagerStatus, `${updated.name} updated to ${Number(updated.distanceKm).toFixed(1)} KM.`, "success");
+        await refreshState();
+      } catch (err) {
+        setStatus(checkpointManagerStatus, err.message, "error");
+      }
+    });
+
+    row.querySelector("[data-cp-action='open']")?.addEventListener("click", () => setStation(cpId, "active", row));
+    row.querySelector("[data-cp-action='close']")?.addEventListener("click", () => setStation(cpId, "completed", row));
+
+    row.querySelector("[data-cp-action='delete']")?.addEventListener("click", async () => {
+      if (!confirm(`Delete checkpoint "${cpId}"? This cannot be undone.`)) return;
+      try {
+        await fetch(`${basePath}/api/checkpoints/${encodeURIComponent(cpId)}/delete`, { method: "POST" })
+          .then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(b.error); return b; });
+        setStatus(checkpointManagerStatus, `Checkpoint deleted.`, "success");
+        await refreshState();
+      } catch (err) {
+        setStatus(checkpointManagerStatus, err.message, "error");
+      }
+    });
+  });
+}
+
+async function setStation(cpId, status, row) {
+  try {
+    await fetch(`${basePath}/api/checkpoints/${encodeURIComponent(cpId)}/station`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    }).then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(b.error); return b; });
+    // Update the station dot immediately.
+    const dot = row?.querySelector(".station-dot");
+    if (dot) { dot.className = `station-dot station-${status}`; dot.title = status; }
+    const label = status === "active" ? "Open" : "Closed";
+    setStatus(checkpointManagerStatus, `Station ${label}.`, "success");
+    await refreshState();
+  } catch (err) {
+    setStatus(checkpointManagerStatus, err.message, "error");
   }
 }
 
@@ -810,20 +915,36 @@ function updateParticipants(participants) {
   }
 }
 
-function updateFeed(feed) {
+function updateFeed(feed, state) {
   const list = document.querySelector("#live-feed");
+  const banner = document.querySelector("#winner-banner");
   if (!list) return;
+
+  // Show winner banner if rank-1 has finished.
+  if (banner) {
+    const leader = (state?.leaderboard || [])[0];
+    if (leader && leader.status === "Finished") {
+      banner.hidden = false;
+      banner.innerHTML = `🏆 <strong>${escapeHTML(leader.runnerName || leader.bibNumber)}</strong> wins! · ${escapeHTML(leader.raceTime)} · ${escapeHTML(leader.category || "")} · ${escapeHTML(leader.bibNumber)}`;
+    } else {
+      banner.hidden = true;
+    }
+  }
+
   if (!feed.length) {
-    list.innerHTML = `<li class="empty-state">No runners have reached this checkpoint yet.</li>`;
+    list.innerHTML = `<li class="empty-state">No runners have reached a checkpoint yet.</li>`;
     return;
   }
-  list.innerHTML = feed.map((log) => `
-    <li>
-      <strong>${escapeHTML(log.participant.bibNumber)}</strong>
-      <span>${escapeHTML(log.checkpoint.name)}</span>
-      <time>${new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}</time>
-    </li>
-  `).join("");
+  list.innerHTML = feed.map((log) => {
+    const isFinish = log.checkpoint.id === "finish" || log.participant.status === "Finished";
+    return `
+      <li${isFinish ? " class='feed-finish'" : ""}>
+        <strong>${escapeHTML(log.participant.bibNumber)}</strong>
+        <span>${log.participant.name ? escapeHTML(log.participant.name) + " · " : ""}${escapeHTML(log.checkpoint.name)}</span>
+        <time>${new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}</time>
+      </li>
+    `;
+  }).join("");
 }
 
 let _activeLeaderboardCategory = "";
