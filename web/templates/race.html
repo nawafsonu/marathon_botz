@@ -62,7 +62,8 @@
       </section>
       {{end}}
 
-      <section class="race-ops-grid" aria-label="Race operations" {{if not .CanManage}}hidden{{end}}>
+      {{if .CanManage}}
+      <section class="race-ops-grid" aria-label="Race operations">
         <section class="panel race-selector-panel">
           <div class="section-heading">
             <div>
@@ -101,6 +102,7 @@
           </form>
         </section>
       </section>
+      {{end}}
 
 
 
