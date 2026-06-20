@@ -468,7 +468,7 @@ registrationForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(registrationForm);
   const bibNumber = (form.get("bibNumber") || "").trim();
-  const cleaned = bibNumber.toUpperCase().replace(/^#/, "").replace(/^BIB-/, "");
+  const cleaned = bibNumber.replace(/^#/, "").trim();
   if (cleaned !== "") {
     if (!/^\d+$/.test(cleaned) || parseInt(cleaned, 10) <= 0) {
       setStatus(registrationStatus, "Bib number must be a positive integer.", "error");

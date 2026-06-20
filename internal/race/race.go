@@ -484,7 +484,7 @@ func (s *Service) RegisterParticipantWithBib(bib, name, phone, category, notes s
 
 	s.mu.Lock()
 	if bib == "" {
-		bib = fmt.Sprintf("BIB-%03d", s.nextParticipant)
+		bib = strconv.Itoa(s.nextParticipant)
 	}
 	if _, exists := s.participantByBib[bib]; exists {
 		s.mu.Unlock()
@@ -750,7 +750,7 @@ func (s *Service) importParticipantLocked(row ImportParticipant, isBibTaken func
 	}
 	bib := normalizeBib(row.BibNumber)
 	if bib == "" {
-		bib = fmt.Sprintf("BIB-%03d", s.nextParticipant)
+		bib = strconv.Itoa(s.nextParticipant)
 	}
 	if _, exists := s.participantByBib[bib]; exists {
 		return Participant{}, fmt.Errorf("%s already exists in this race", bib)
@@ -1233,11 +1233,10 @@ func (s *Service) startCheckpointLocked() (Checkpoint, bool) {
 }
 
 func bibNumber(bib string) int {
-	parts := strings.Split(strings.TrimSpace(bib), "-")
-	if len(parts) != 2 {
-		return 0
-	}
-	n, err := strconv.Atoi(parts[1])
+	// Support both plain numbers ("555") and legacy BIB-prefix ("BIB-555")
+	s := strings.TrimSpace(bib)
+	s = strings.TrimPrefix(s, "BIB-")
+	n, err := strconv.Atoi(s)
 	if err != nil {
 		return 0
 	}
@@ -1245,17 +1244,19 @@ func bibNumber(bib string) int {
 }
 
 func normalizeBib(value string) string {
-	value = strings.ToUpper(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
+	// Strip legacy prefixes
 	value = strings.TrimPrefix(value, "#")
-	value = strings.TrimPrefix(value, "BIB-")
+	value = strings.TrimPrefix(strings.ToUpper(value), "BIB-")
 	n, err := strconv.Atoi(value)
 	if err != nil {
 		return strings.ToUpper(strings.TrimSpace(value))
 	}
-	return fmt.Sprintf("BIB-%03d", n)
+	// Plain number — no prefix
+	return strconv.Itoa(n)
 }
 
 func NormalizeBib(value string) string {

@@ -22,7 +22,7 @@
       <div class="print-single-container" style="display: flex; flex-direction: column; gap: var(--spacing-xs); align-items: flex-end;">
         <span class="certificate-kicker">Print by Bib Number</span>
         <form id="single-certificate-form" onsubmit="event.preventDefault(); window.open('{{.BasePath}}/runners/' + this.bibNumber.value.trim().toUpperCase() + '/certificate', '_blank')" style="display: flex; gap: var(--spacing-xs);">
-          <input name="bibNumber" placeholder="BIB-001" required style="padding: var(--spacing-xs) var(--spacing-sm); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: var(--font-sm); background: var(--bg-surface); color: var(--text-primary); width: 120px; text-transform: uppercase;">
+          <input name="bibNumber" placeholder="001" required style="padding: var(--spacing-xs) var(--spacing-sm); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: var(--font-sm); background: var(--bg-surface); color: var(--text-primary); width: 120px; text-transform: uppercase;">
           <button type="submit" class="secondary-button" style="margin: 0; padding: var(--spacing-xs) var(--spacing-sm);">Print</button>
         </form>
       </div>
