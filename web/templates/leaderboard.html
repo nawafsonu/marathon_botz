@@ -19,11 +19,15 @@
         <a href="{{.BasePath}}/race">Race</a>
         <a class="active" href="{{.BasePath}}/leaderboard" aria-current="page">Leaderboard</a>
       </nav>
-      {{if .AuthEnabled}}
+      {{if and .AuthEnabled .User.Username}}
         <form method="post" action="/logout" class="leaderboard-logout">
           <span>{{.User.Username}}</span>
           <button type="submit">Logout</button>
         </form>
+      {{else if .AuthEnabled}}
+        <div class="leaderboard-logout">
+          <a href="/login" style="color: var(--text-muted); text-decoration: none; border: 1px solid var(--border-color); padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--radius-sm); font-size: var(--font-sm);">Login</a>
+        </div>
       {{end}}
     </header>
 

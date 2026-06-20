@@ -1081,4 +1081,42 @@ leaderboardStage?.addEventListener("mouseleave", startLeaderboardRotation);
 
 startLeaderboardRotation();
 
+// Event auto-rotation on leaderboard page — cycles through all available events in the dropdown every 10 seconds.
+const leaderboardRaceSelector = document.querySelector("#leaderboard-race-selector");
+if (leaderboardRaceSelector) {
+  let eventRotationTimer = setInterval(() => {
+    const options = Array.from(leaderboardRaceSelector.options);
+    if (options.length < 2) return;
+    const currentIdx = leaderboardRaceSelector.selectedIndex;
+    const nextIdx = (currentIdx + 1) % options.length;
+    const nextURL = options[nextIdx].value;
+    if (nextURL) {
+      window.location.href = nextURL;
+    }
+  }, 10000);
+
+  // Pause event rotation when mouse enters the leaderboard, resume when it leaves
+  const stage = document.querySelector("#leaderboard");
+  stage?.addEventListener("mouseenter", () => {
+    if (eventRotationTimer) {
+      clearInterval(eventRotationTimer);
+      eventRotationTimer = null;
+    }
+  });
+  stage?.addEventListener("mouseleave", () => {
+    if (!eventRotationTimer) {
+      eventRotationTimer = setInterval(() => {
+        const options = Array.from(leaderboardRaceSelector.options);
+        if (options.length < 2) return;
+        const currentIdx = leaderboardRaceSelector.selectedIndex;
+        const nextIdx = (currentIdx + 1) % options.length;
+        const nextURL = options[nextIdx].value;
+        if (nextURL) {
+          window.location.href = nextURL;
+        }
+      }, 10000);
+    }
+  });
+}
+
 setInterval(refreshState, 5000);

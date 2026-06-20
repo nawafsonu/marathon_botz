@@ -1820,8 +1820,21 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if s.authManager == nil {
 		return true
 	}
-	if r.URL.Path == "/login" || r.URL.Path == "/guest-login" || strings.HasPrefix(r.URL.Path, "/static/") {
+	path := r.URL.Path
+	if path == "/login" || path == "/guest-login" || strings.HasPrefix(path, "/static/") {
 		return true
+	}
+	// Allow public access to leaderboard, state API, and runner profiles
+	if r.Method == http.MethodGet {
+		if path == "/leaderboard" ||
+			path == "/api/state" ||
+			strings.HasPrefix(path, "/runners/") ||
+			(strings.HasPrefix(path, "/events/") && (
+				strings.HasSuffix(path, "/leaderboard") ||
+				strings.HasSuffix(path, "/api/state") ||
+				strings.Contains(path, "/runners/"))) {
+			return true
+		}
 	}
 	user, ok := s.authenticatedUser(r)
 	if ok {

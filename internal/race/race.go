@@ -1070,6 +1070,12 @@ func (s *Service) liveCheckpointGapLocked(leader LeaderboardEntry, entry Leaderb
 	if entry.LatestSequence <= 0 {
 		return "not started"
 	}
+	if entry.LatestSequence == 1 {
+		return "at start"
+	}
+	if leader.LatestSequence > entry.LatestSequence {
+		return fmt.Sprintf("-%d CP", leader.LatestSequence-entry.LatestSequence)
+	}
 	leaderTime, checkpointName, ok := s.timestampForSequenceLocked(leader.BibNumber, entry.LatestSequence)
 	if !ok {
 		return fmt.Sprintf("-%d CP", leader.LatestSequence-entry.LatestSequence)
