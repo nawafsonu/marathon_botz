@@ -1,6 +1,7 @@
 *.log
 tmp-*
 .env
+.env.example
 .env.local
 logincred.txt
 *.sessions

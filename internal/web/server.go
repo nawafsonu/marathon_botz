@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -119,8 +120,14 @@ func WithProjectServices(services []*race.Service) Option {
 		}
 		s.service = services[0]
 		s.projects = newProjectRegistry(services[0])
+		log.Printf("[DEBUG] WithProjectServices: set active service %q, total services received: %d", services[0].Event().ID, len(services))
 		for _, service := range services[1:] {
-			_ = s.addProject(service.Event().ID, service)
+			err := s.addProject(service.Event().ID, service)
+			if err != nil {
+				log.Printf("[DEBUG] WithProjectServices: failed to add project %q: %v", service.Event().ID, err)
+			} else {
+				log.Printf("[DEBUG] WithProjectServices: successfully added project %q", service.Event().ID)
+			}
 		}
 	}
 }
@@ -1751,6 +1758,7 @@ func (s *Server) dashboardURLLocked() string {
 func (s *Server) projectSummaries(activeID string) []projectSummary {
 	s.projects.mu.RLock()
 	defer s.projects.mu.RUnlock()
+	log.Printf("[DEBUG] projectSummaries: activeID=%q, s.projects.ids=%v", activeID, s.projects.ids)
 	summaries := make([]projectSummary, 0, len(s.projects.ids))
 	for _, id := range s.projects.ids {
 		service := s.projects.services[id]
