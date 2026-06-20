@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Guest Access – Certificate Download · Marathon Tracker</title>
-  <meta name="description" content="Enter your bib number and registered phone number to generate and download your finisher certificate.">
+  <meta name="description" content="Enter your bib number and registered full name to generate and download your finisher certificate.">
   <link rel="stylesheet" href="/static/styles.css">
   <style>
     .guest-shell {
@@ -215,7 +215,7 @@
 
         <div>
           <h1>Get Your Certificate</h1>
-          <p class="sub">Enter the bib number and phone number you registered with to generate and download your finisher certificate.</p>
+          <p class="sub">Enter the bib number and registered full name you registered with to generate and download your finisher certificate.</p>
         </div>
 
         <div class="rule"></div>
@@ -244,18 +244,18 @@
             >
           </label>
 
-          <label for="phone-input">
-            Registered Phone Number
+          <label for="name-input">
+            Registered Full Name
             <input
-              type="tel"
-              id="phone-input"
-              name="phone"
-              value="{{.Phone}}"
-              placeholder="e.g. 9876543210"
-              autocomplete="tel"
+              type="text"
+              id="name-input"
+              name="name"
+              value="{{.Name}}"
+              placeholder="e.g. John Doe"
+              autocomplete="name"
               required
             >
-            <span class="field-hint">Use the number you gave at registration</span>
+            <span class="field-hint">Use the name you gave at registration</span>
           </label>
 
           <button type="submit" class="submit-btn" id="get-certificate-btn">

@@ -343,13 +343,16 @@ func (s *Server) leaderboardPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
-	service, ok := s.serviceForRequest(w, r)
-	if !ok {
-		return
-	}
 	bib := r.PathValue("bib")
-	if targetService, found := s.findServiceForBib(service.Event().MarathonID, bib); found {
+	var service *race.Service
+	if targetService, found := s.findServiceForBib("", bib); found {
 		service = targetService
+	} else {
+		var ok bool
+		service, ok = s.serviceForRequest(w, r)
+		if !ok {
+			return
+		}
 	}
 	profile, err := service.RunnerProfile(bib)
 	if err != nil {
@@ -375,13 +378,16 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runnerCertificate(w http.ResponseWriter, r *http.Request) {
-	service, ok := s.serviceForRequest(w, r)
-	if !ok {
-		return
-	}
 	bib := r.PathValue("bib")
-	if targetService, found := s.findServiceForBib(service.Event().MarathonID, bib); found {
+	var service *race.Service
+	if targetService, found := s.findServiceForBib("", bib); found {
 		service = targetService
+	} else {
+		var ok bool
+		service, ok = s.serviceForRequest(w, r)
+		if !ok {
+			return
+		}
 	}
 	profile, err := service.RunnerProfile(bib)
 	if err != nil {
@@ -473,7 +479,7 @@ func (s *Server) guestLoginPage(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Error string
 		Bib   string
-		Phone string
+		Name  string
 	}{}
 	if err := s.templates.ExecuteTemplate(w, "guest_login.html", data); err != nil {
 		http.Error(w, "guest login page could not be rendered", http.StatusInternalServerError)
@@ -491,27 +497,27 @@ func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bib := strings.TrimSpace(r.FormValue("bib"))
-	phone := strings.TrimSpace(r.FormValue("phone"))
+	name := strings.TrimSpace(r.FormValue("name"))
 
 	renderError := func(msg string) {
 		w.WriteHeader(http.StatusUnauthorized)
 		data := struct {
 			Error string
 			Bib   string
-			Phone string
-		}{Error: msg, Bib: bib, Phone: phone}
+			Name  string
+		}{Error: msg, Bib: bib, Name: name}
 		_ = s.templates.ExecuteTemplate(w, "guest_login.html", data)
 	}
 
-	if bib == "" || phone == "" {
-		renderError("Bib number and phone number are required.")
+	if bib == "" || name == "" {
+		renderError("Bib number and runner name are required.")
 		return
 	}
 
-	// Validate bib + phone against registered participants across all events.
-	bibPath, ok := s.authenticateGuest(bib, phone)
+	// Validate bib + name against registered participants across all events.
+	bibPath, ok := s.authenticateGuest(bib, name)
 	if !ok {
-		renderError("No matching runner found. Please check your bib number and phone number.")
+		renderError("No matching runner found. Please check your bib number and name.")
 		return
 	}
 
@@ -540,12 +546,12 @@ func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // authenticateGuest looks up a participant by bib number across all loaded race
-// services and checks if the supplied phone number matches. Returns the
+// services and checks if the supplied runner name matches. Returns the
 // certificate URL for that runner on success.
-func (s *Server) authenticateGuest(bib, phone string) (string, bool) {
+func (s *Server) authenticateGuest(bib, name string) (string, bool) {
 	normBib := strings.ToUpper(strings.TrimSpace(bib))
-	normPhone := normalizePhone(phone)
-	if normBib == "" || normPhone == "" {
+	normName := strings.ToLower(strings.TrimSpace(name))
+	if normBib == "" || normName == "" {
 		return "", false
 	}
 
@@ -562,16 +568,11 @@ func (s *Server) authenticateGuest(bib, phone string) (string, bool) {
 			if strings.ToUpper(strings.TrimSpace(p.BibNumber)) != normBib {
 				continue
 			}
-			if normalizePhone(p.PhoneNumber) != normPhone {
+			if strings.ToLower(strings.TrimSpace(p.Name)) != normName {
 				continue
 			}
-			// Match — build the certificate URL.
-			eventID := svc.Event().ID
-			base := ""
-			if eventID != activeID {
-				base = "/events/" + eventID
-			}
-			return base + "/runners/" + p.BibNumber + "/certificate", true
+			// Match — build the global certificate URL.
+			return "/runners/" + p.BibNumber + "/certificate", true
 		}
 	}
 	return "", false
