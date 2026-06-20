@@ -31,14 +31,42 @@
       <div class="guest-divider">
         <span>or</span>
       </div>
-      <a href="/guest-login" class="guest-entry-link" id="guest-entry-link">
-        <span class="guest-entry-icon">🏅</span>
-        <span class="guest-entry-text">
+      <div class="guest-certificate-box">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+          <span class="guest-entry-icon">🏅</span>
           <strong>Download My Certificate</strong>
-          <small>Enter bib number &amp; name · certificate access only</small>
-        </span>
-        <span class="guest-entry-arrow">→</span>
-      </a>
+        </div>
+        <form method="post" action="/guest-login" class="stacked-form" id="guest-credential-form" novalidate>
+          <label for="bib-input">
+            Bib Number
+            <input
+              type="text"
+              id="bib-input"
+              name="bib"
+              value="{{.Bib}}"
+              placeholder="e.g. BIB-042"
+              autocomplete="off"
+              autocapitalize="characters"
+              maxlength="20"
+              required
+            >
+          </label>
+          <label for="name-input">
+            Registered Full Name
+            <input
+              type="text"
+              id="name-input"
+              name="name"
+              value="{{.Name}}"
+              placeholder="e.g. John Doe"
+              autocomplete="name"
+              required
+            >
+          </label>
+          <button type="submit" style="background: var(--orange); color: #160702; font-weight: 900; min-height: 3rem; margin-top: 0.5rem;">Get My Certificate →</button>
+          {{if .GuestError}}<p class="form-status error" role="alert" style="margin-top: 0.5rem;">{{.GuestError}}</p>{{end}}
+        </form>
+      </div>
       <a href="/leaderboard" class="guest-entry-link" id="leaderboard-entry-link" style="margin-top: 0.75rem;">
         <span class="guest-entry-icon">🏆</span>
         <span class="guest-entry-text">
@@ -104,6 +132,22 @@
       color: var(--muted);
       font-size: 1.1rem;
     }
+    .guest-certificate-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1.25rem;
+      background: rgba(255,255,255,0.03);
+      margin-bottom: 0.75rem;
+      text-align: left;
+    }
   </style>
+  <script>
+    var bibInput = document.getElementById('bib-input');
+    if (bibInput) {
+      bibInput.addEventListener('blur', function () {
+        this.value = this.value.trim().toUpperCase();
+      });
+    }
+  </script>
 </body>
 </html>

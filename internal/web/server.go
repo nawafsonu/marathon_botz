@@ -464,7 +464,10 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := struct {
-		Error string
+		Error      string
+		GuestError string
+		Bib        string
+		Name       string
 	}{}
 	if err := s.templates.ExecuteTemplate(w, "login.html", data); err != nil {
 		http.Error(w, "login page could not be rendered", http.StatusInternalServerError)
@@ -472,18 +475,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) guestLoginPage(w http.ResponseWriter, r *http.Request) {
-	if s.authManager == nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	data := struct {
-		Error string
-		Bib   string
-		Name  string
-	}{}
-	if err := s.templates.ExecuteTemplate(w, "guest_login.html", data); err != nil {
-		http.Error(w, "guest login page could not be rendered", http.StatusInternalServerError)
-	}
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
@@ -502,11 +494,12 @@ func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
 	renderError := func(msg string) {
 		w.WriteHeader(http.StatusUnauthorized)
 		data := struct {
-			Error string
-			Bib   string
-			Name  string
-		}{Error: msg, Bib: bib, Name: name}
-		_ = s.templates.ExecuteTemplate(w, "guest_login.html", data)
+			Error      string
+			GuestError string
+			Bib        string
+			Name       string
+		}{Error: "", GuestError: msg, Bib: bib, Name: name}
+		_ = s.templates.ExecuteTemplate(w, "login.html", data)
 	}
 
 	if bib == "" || name == "" {
@@ -603,7 +596,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.authManager.Authenticate(r.FormValue("username"), r.FormValue("password"))
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = s.templates.ExecuteTemplate(w, "login.html", struct{ Error string }{Error: "Invalid username or password"})
+		data := struct {
+			Error      string
+			GuestError string
+			Bib        string
+			Name       string
+		}{Error: "Invalid username or password"}
+		_ = s.templates.ExecuteTemplate(w, "login.html", data)
 		return
 	}
 	token, err := sessionToken()
