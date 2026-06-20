@@ -553,7 +553,6 @@ func (s *Server) authenticateGuest(bib, name string) (string, bool) {
 	for _, id := range s.projects.ids {
 		services = append(services, s.projects.services[id])
 	}
-	activeID := s.projects.activeID
 	s.projects.mu.RUnlock()
 
 	for _, svc := range services {
