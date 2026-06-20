@@ -57,21 +57,24 @@ async function postJSON(url, payload) {
 checkpointForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(checkpointForm);
+  const bibNumber = String(form.get("bibNumber") || "").trim().toUpperCase();
+  if (!bibNumber) {
+    setStatus(checkpointStatus, "Enter a bib number.", "error");
+    return;
+  }
   const payload = {
-    checkpointId: form.get("checkpointId"),
-    participantId: form.get("participantId"),
+    bibNumber,
+    // Empty checkpointId means "next checkpoint (automatic)".
+    checkpointId: form.get("checkpointId") || "",
     volunteerId: form.get("volunteerId"),
   };
-  const bibNumber = String(form.get("bibNumber") || "").trim().toUpperCase();
-  if (bibNumber) {
-    payload.bibNumber = bibNumber;
-  }
   setStatus(checkpointStatus, "Recording checkpoint...");
   try {
     const log = await postJSON(`${basePath}/api/checkpoint-logs`, payload);
     setStatus(checkpointStatus, `${log.participant.bibNumber} recorded at ${log.checkpoint.name}.`, "success");
-    checkpointForm.elements.namedItem("bibNumber").value = "";
-    checkpointForm.elements.namedItem("participantId").focus();
+    const bibInput = checkpointForm.elements.namedItem("bibNumber");
+    bibInput.value = "";
+    bibInput.focus();
     await refreshState();
   } catch (error) {
     setStatus(checkpointStatus, error.message, "error");
@@ -135,11 +138,7 @@ chestReaderCandidates?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-chest-bib]");
   if (!button || !checkpointForm) return;
   const bibNumber = button.dataset.chestBib;
-  const participantId = button.dataset.chestParticipantId;
   checkpointForm.elements.namedItem("bibNumber").value = bibNumber;
-  if (participantId) {
-    checkpointForm.elements.namedItem("participantId").value = participantId;
-  }
   stopChestReader();
   setStatus(checkpointStatus, `Recording ${bibNumber} from camera selection...`);
   checkpointForm.requestSubmit();
@@ -198,9 +197,6 @@ function handleChestReaderResult(result) {
     return;
   }
   checkpointForm.elements.namedItem("bibNumber").value = result.bibNumber;
-  if (result.participantId) {
-    checkpointForm.elements.namedItem("participantId").value = result.participantId;
-  }
   stopChestReader();
   setStatus(checkpointStatus, `Recording ${result.bibNumber} from camera...`);
   checkpointForm.requestSubmit();
@@ -386,14 +382,14 @@ registrationForm?.addEventListener("submit", async (event) => {
   setStatus(registrationStatus, "Registering runner...");
   try {
     const participant = await postJSON(`${basePath}/api/participants`, {
-      name: form.get("name"),
-      phoneNumber: form.get("phoneNumber"),
-      category: form.get("category") || "",
-      notes: form.get("notes"),
+      bibNumber: form.get("bibNumber"),
+      name: form.get("name") || "",
     });
-    setStatus(registrationStatus, `${participant.name} registered as ${participant.bibNumber} (${participant.category || "no category"}).`, "success");
+    const who = participant.name || participant.bibNumber;
+    setStatus(registrationStatus, `${who} registered as ${participant.bibNumber}${participant.category ? " · " + participant.category : ""}.`, "success");
     registrationForm.reset();
     await refreshState();
+    registrationForm.querySelector("[name='bibNumber']")?.focus();
   } catch (error) {
     setStatus(registrationStatus, error.message, "error");
   }
@@ -401,12 +397,14 @@ registrationForm?.addEventListener("submit", async (event) => {
 
 startRaceForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  setStatus(startRaceStatus, "Starting race...");
+  const category = new FormData(startRaceForm).get("category") || "";
+  const label = category ? `${category} runners` : "All runners";
+  setStatus(startRaceStatus, `Starting ${label}...`);
   try {
-    const eventData = await postJSON(`${basePath}/api/start-race`, {});
+    const eventData = await postJSON(`${basePath}/api/start-race`, { category });
     updateEvent(eventData);
     await refreshState();
-    setStatus(startRaceStatus, `${eventData.name} is active. Start checkpoint recorded.`, "success");
+    setStatus(startRaceStatus, `${label} started for ${eventData.name}. Start checkpoint recorded.`, "success");
   } catch (error) {
     setStatus(startRaceStatus, error.message, "error");
   }
@@ -698,9 +696,10 @@ function updateCheckpoints(checkpoints) {
   const select = checkpointForm?.elements.namedItem("checkpointId");
   if (select) {
     const selected = select.value;
-    select.innerHTML = checkpoints.map((checkpoint) => `
+    const options = checkpoints.map((checkpoint) => `
       <option value="${escapeHTML(checkpoint.id)}">${escapeHTML(checkpoint.name)} · ${Number(checkpoint.distanceKm).toFixed(0)} KM</option>
     `).join("");
+    select.innerHTML = `<option value="">Next checkpoint (automatic)</option>${options}`;
     if (selected && [...select.options].some((option) => option.value === selected)) {
       select.value = selected;
     }

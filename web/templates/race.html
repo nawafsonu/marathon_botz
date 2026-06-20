@@ -47,6 +47,15 @@
           <span>Scheduled start: {{.Snapshot.Event.StartTime.Format "Mon 02 Jan, 15:04"}} UTC</span>
         </div>
         <form id="start-race-form">
+          <label class="start-race-category">
+            Start category
+            <select name="category" id="start-race-category">
+              <option value="">All categories</option>
+              {{range .Snapshot.Event.Categories}}
+                <option value="{{.}}">{{.}}</option>
+              {{end}}
+            </select>
+          </label>
           <button class="start-race-button" type="submit">Start Race</button>
           <p class="form-status" id="start-race-status" role="status"></p>
         </form>
@@ -80,28 +89,14 @@
           </div>
           <form id="registration-form" class="stacked-form compact">
             <label>
-              Full name
-              <input name="name" autocomplete="name" placeholder="Runner name" required>
+              Bib number
+              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="045" required>
             </label>
             <label>
-              Phone number
-              <input name="phoneNumber" autocomplete="tel" placeholder="+91 90000 10000" required>
+              Full name <span class="optional-hint">optional</span>
+              <input name="name" autocomplete="name" placeholder="Runner name">
             </label>
-            <label>
-              Category
-              <select name="category" id="race-category-select">
-                {{range .Snapshot.Event.Categories}}
-                  <option value="{{.}}">{{.}}</option>
-                {{else}}
-                  <option value="">No categories set</option>
-                {{end}}
-              </select>
-            </label>
-            <label>
-              Notes
-              <input name="notes" placeholder="Optional">
-            </label>
-            <button type="submit">Register runner</button>
+            <button type="submit">Add runner to {{.Snapshot.Event.Name}}</button>
             <p class="form-status" id="registration-status" role="status"></p>
           </form>
         </section>
@@ -118,26 +113,17 @@
           </div>
           <form id="checkpoint-form" class="stacked-form">
             <label>
+              Bib number
+              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="045" autofocus required>
+            </label>
+            <label>
               Checkpoint
-              <select name="checkpointId" required>
+              <select name="checkpointId">
+                <option value="">Next checkpoint (automatic)</option>
                 {{range .Snapshot.Checkpoints}}
                   <option value="{{.ID}}">{{.Name}} · {{printf "%.0f" .DistanceKM}} KM</option>
                 {{end}}
               </select>
-            </label>
-            <label>
-              Runner
-              <select name="participantId">
-                {{range .Snapshot.Participants}}
-                  <option value="{{.ID}}">{{.BibNumber}} · {{.Name}}</option>
-                {{else}}
-                  <option value="">Register a runner first</option>
-                {{end}}
-              </select>
-            </label>
-            <label>
-              Chest number
-              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="BIB-001 or 001">
             </label>
             <div class="chest-reader" data-chest-reader-enabled="{{.ChestReaderEnabled}}">
               <div class="chest-reader-header">

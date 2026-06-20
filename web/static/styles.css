@@ -278,6 +278,31 @@ label {
   font-weight: 800;
 }
 
+.optional-hint {
+  text-transform: none;
+  font-weight: 600;
+  font-size: 0.7rem;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.start-race-category {
+  display: block;
+  margin-bottom: 0.6rem;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.start-race-category select {
+  margin-top: 0.35rem;
+  width: 100%;
+  min-height: 2.8rem;
+  text-transform: none;
+}
+
 .start-race-button {
   width: 100%;
   min-height: 5rem;

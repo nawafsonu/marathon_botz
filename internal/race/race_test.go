@@ -63,6 +63,112 @@ func TestRegisterParticipantGeneratesSequentialBibs(t *testing.T) {
 	}
 }
 
+func TestRegisterParticipantWithBib(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+
+	// A volunteer types just a bib number (and the race-derived category).
+	runner, err := svc.RegisterParticipantWithBib("45", "", "", "21 KM", "")
+	if err != nil {
+		t.Fatalf("register with bib: %v", err)
+	}
+	if runner.BibNumber != "BIB-045" {
+		t.Fatalf("bib = %s, want BIB-045 (normalized)", runner.BibNumber)
+	}
+	if runner.Category != "21 KM" {
+		t.Fatalf("category = %q, want 21 KM", runner.Category)
+	}
+	if runner.Name != "" {
+		t.Fatalf("name = %q, want empty (optional)", runner.Name)
+	}
+
+	// The same bib cannot be registered twice in a race.
+	if _, err := svc.RegisterParticipantWithBib("045", "Someone Else", "", "21 KM", ""); err == nil {
+		t.Fatal("expected an error registering a duplicate bib")
+	}
+
+	// An empty bib still auto-generates a sequential one, picking up after BIB-045.
+	auto, err := svc.RegisterParticipantWithBib("", "Walk Up", "", "21 KM", "")
+	if err != nil {
+		t.Fatalf("register without bib: %v", err)
+	}
+	if auto.BibNumber != "BIB-046" {
+		t.Fatalf("auto bib = %s, want BIB-046", auto.BibNumber)
+	}
+
+	// With neither bib nor name there is nothing to register.
+	if _, err := svc.RegisterParticipantWithBib("", "", "", "21 KM", ""); err == nil {
+		t.Fatal("expected an error with no bib and no name")
+	}
+}
+
+func TestRecordNextCheckpointAdvancesRunner(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+	runner, err := svc.RegisterParticipantWithBib("7", "Auto Runner", "", "", "")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// seedCheckpoints is start → cp1 → cp2 → finish; each bib-only scan advances one.
+	base := time.Now().UTC()
+	for i, want := range []string{"start", "cp1", "cp2", "finish"} {
+		log, err := svc.RecordNextCheckpoint(runner.BibNumber, "vol-1", base.Add(time.Duration(i)*time.Minute))
+		if err != nil {
+			t.Fatalf("record next #%d: %v", i, err)
+		}
+		if log.Checkpoint.ID != want {
+			t.Fatalf("auto checkpoint #%d = %s, want %s", i, log.Checkpoint.ID, want)
+		}
+	}
+
+	// Past the finish there is nothing left to record.
+	if _, err := svc.RecordNextCheckpoint(runner.BibNumber, "vol-1", base.Add(time.Hour)); !errors.Is(err, ErrRaceComplete) {
+		t.Fatalf("after finish err = %v, want ErrRaceComplete", err)
+	}
+
+	if _, err := svc.RecordNextCheckpoint("BIB-999", "vol-1", base); !errors.Is(err, ErrInvalidBib) {
+		t.Fatalf("unknown bib err = %v, want ErrInvalidBib", err)
+	}
+}
+
+func TestRecordCheckpointLocksBibWithinWindow(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+	runner, err := svc.RegisterParticipantWithBib("8", "Lock Runner", "", "", "")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	base := time.Now().UTC()
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "start", "vol-1", base); err != nil {
+		t.Fatalf("record start: %v", err)
+	}
+	// A second scan two minutes later is locked (inside the 10-minute window).
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "cp1", "vol-1", base.Add(2*time.Minute)); !errors.Is(err, ErrBibLocked) {
+		t.Fatalf("within window err = %v, want ErrBibLocked", err)
+	}
+	// Once the window passes the next checkpoint records normally.
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "cp1", "vol-1", base.Add(11*time.Minute)); err != nil {
+		t.Fatalf("after window: %v", err)
+	}
+}
+
+func TestStartRaceAutoStartDoesNotLockFirstCheckpoint(t *testing.T) {
+	event := seedEvent()
+	event.Status = EventStatusUpcoming
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+	runner, err := svc.RegisterParticipantWithBib("9", "Fast Runner", "", "", "")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := svc.StartRace(); err != nil {
+		t.Fatalf("start race: %v", err)
+	}
+	// The automatic Start must not lock the bib, so a fast runner can be recorded
+	// at the first checkpoint moments after the gun.
+	if _, err := svc.RecordCheckpoint(runner.BibNumber, "cp1", "vol-1", time.Now().UTC().Add(time.Minute)); err != nil {
+		t.Fatalf("fast cp1 after auto start: %v", err)
+	}
+}
+
 func TestRecordCheckpointRejectsInvalidAndOutOfOrderEntries(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 	runner, err := svc.RegisterParticipant("Maya Iyer", "+91 90000 10001", "", "")
@@ -284,6 +390,60 @@ func TestStartRaceHonorsScheduledStartTimeWhenStartedEarly(t *testing.T) {
 	}
 	if len(profile.Timeline) != 1 || !profile.Timeline[0].Timestamp.Equal(scheduled) {
 		t.Fatalf("start checkpoint timestamp = %v, want scheduled %s", profile.Timeline, scheduled)
+	}
+}
+
+func TestStartRaceCategoryStartsOnlyThatCategory(t *testing.T) {
+	event := seedEvent()
+	event.Status = EventStatusUpcoming
+	event.Categories = []string{"5 KM", "21 KM"}
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+
+	short, err := svc.RegisterParticipant("Short Runner", "+91 90000 10001", "5 KM", "")
+	if err != nil {
+		t.Fatalf("register short: %v", err)
+	}
+	long, err := svc.RegisterParticipant("Long Runner", "+91 90000 10002", "21 KM", "")
+	if err != nil {
+		t.Fatalf("register long: %v", err)
+	}
+
+	if _, err := svc.StartRaceCategory("5 KM"); err != nil {
+		t.Fatalf("start 5 KM: %v", err)
+	}
+
+	shortProfile, err := svc.RunnerProfile(short.BibNumber)
+	if err != nil {
+		t.Fatalf("short profile: %v", err)
+	}
+	if len(shortProfile.Timeline) != 1 || shortProfile.Timeline[0].Checkpoint.ID != "start" {
+		t.Fatalf("5 KM runner should have a recorded start, got %#v", shortProfile.Timeline)
+	}
+
+	longProfile, err := svc.RunnerProfile(long.BibNumber)
+	if err != nil {
+		t.Fatalf("long profile: %v", err)
+	}
+	if len(longProfile.Timeline) != 0 {
+		t.Fatalf("21 KM runner should not be started yet, got %d logs", len(longProfile.Timeline))
+	}
+	if longProfile.Participant.Status != RaceStatusRegistered {
+		t.Fatalf("21 KM runner status = %s, want %s", longProfile.Participant.Status, RaceStatusRegistered)
+	}
+
+	if _, err := svc.StartRaceCategory("marathon"); err == nil {
+		t.Fatal("expected an error when starting an unknown category")
+	}
+
+	if _, err := svc.StartRaceCategory("21 KM"); err != nil {
+		t.Fatalf("start 21 KM: %v", err)
+	}
+	longProfile, err = svc.RunnerProfile(long.BibNumber)
+	if err != nil {
+		t.Fatalf("long profile after start: %v", err)
+	}
+	if len(longProfile.Timeline) != 1 {
+		t.Fatalf("21 KM runner should be started after its category starts, got %d logs", len(longProfile.Timeline))
 	}
 }
 

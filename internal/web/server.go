@@ -848,6 +848,7 @@ func (s *Server) registerParticipant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
+		BibNumber   string `json:"bibNumber"`
 		Name        string `json:"name"`
 		PhoneNumber string `json:"phoneNumber"`
 		Category    string `json:"category"`
@@ -857,7 +858,21 @@ func (s *Server) registerParticipant(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return
 	}
-	participant, err := service.RegisterParticipant(input.Name, input.PhoneNumber, input.Category, input.Notes)
+	event := service.Event()
+	// One bib = one runner across every race in the marathon.
+	if raceName, taken := s.marathonBibTaken(event.MarathonID, event.ID, input.BibNumber); taken {
+		writeProblem(w, http.StatusUnprocessableEntity, fmt.Sprintf("bib %s is already registered in %s", race.NormalizeBib(input.BibNumber), raceName))
+		return
+	}
+	// The selected race already determines the category, so volunteers don't pick
+	// one: default to the race's category when the client doesn't send it.
+	category := strings.TrimSpace(input.Category)
+	if category == "" {
+		if cats := event.Categories; len(cats) > 0 {
+			category = cats[0]
+		}
+	}
+	participant, err := service.RegisterParticipantWithBib(input.BibNumber, input.Name, input.PhoneNumber, category, input.Notes)
 	if err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -917,7 +932,12 @@ func (s *Server) startRace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	event, err := service.StartRace()
+	// Body is optional: an empty body (or no "category") starts every runner.
+	var input struct {
+		Category string `json:"category"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&input)
+	event, err := service.StartRaceCategory(input.Category)
 	if err != nil {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -1009,7 +1029,17 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		bibNumber = participant.BibNumber
 	}
-	log, err := service.RecordCheckpoint(bibNumber, input.CheckpointID, input.VolunteerID, time.Now().UTC())
+	// No checkpoint chosen means "dynamic": record the runner's next checkpoint
+	// in course order, so the volunteer only has to type the bib number.
+	var (
+		log race.CheckpointLog
+		err error
+	)
+	if strings.TrimSpace(input.CheckpointID) == "" {
+		log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, time.Now().UTC())
+	} else {
+		log, err = service.RecordCheckpoint(bibNumber, input.CheckpointID, input.VolunteerID, time.Now().UTC())
+	}
 	if err != nil {
 		writeProblem(w, statusForRaceError(err), err.Error())
 		return
@@ -1308,7 +1338,7 @@ func statusForRaceError(err error) int {
 	switch {
 	case errors.Is(err, race.ErrInvalidBib), errors.Is(err, race.ErrInvalidCheckpoint):
 		return http.StatusNotFound
-	case errors.Is(err, race.ErrDuplicateEntry), errors.Is(err, race.ErrOutOfOrderEntry), errors.Is(err, race.ErrInvalidParticipant):
+	case errors.Is(err, race.ErrDuplicateEntry), errors.Is(err, race.ErrOutOfOrderEntry), errors.Is(err, race.ErrInvalidParticipant), errors.Is(err, race.ErrRaceComplete), errors.Is(err, race.ErrBibLocked):
 		return http.StatusUnprocessableEntity
 	default:
 		return http.StatusInternalServerError
@@ -1362,6 +1392,34 @@ func (s *Server) serviceForRequest(w http.ResponseWriter, r *http.Request) (*rac
 		return nil, false
 	}
 	return service, true
+}
+
+// marathonBibTaken reports whether the given bib is already registered in another
+// race of the same marathon, so one bib maps to one runner across 5/10/21 KM etc.
+// Returns the conflicting race name. Ungrouped races (empty marathonID) are not
+// cross-checked.
+func (s *Server) marathonBibTaken(marathonID, eventID, bib string) (string, bool) {
+	bib = race.NormalizeBib(bib)
+	if marathonID == "" || bib == "" {
+		return "", false
+	}
+	s.projects.mu.RLock()
+	defer s.projects.mu.RUnlock()
+	for _, id := range s.projects.ids {
+		if id == eventID {
+			continue
+		}
+		service := s.projects.services[id]
+		if service.Event().MarathonID != marathonID {
+			continue
+		}
+		for _, participant := range service.Participants() {
+			if race.NormalizeBib(participant.BibNumber) == bib {
+				return service.Event().Name, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (s *Server) addProject(id string, service *race.Service) error {

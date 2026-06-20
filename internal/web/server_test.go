@@ -790,8 +790,11 @@ func TestRaceAndLeaderboardRenderAsSeparatePages(t *testing.T) {
 	if !strings.Contains(raceRes.Body.String(), "Race Checkpoint Entry") {
 		t.Fatal("race page should render race checkpoint entry")
 	}
-	if !strings.Contains(raceRes.Body.String(), `name="participantId"`) {
-		t.Fatal("race page should render a runner selector for checkpoint entry")
+	if !strings.Contains(raceRes.Body.String(), `name="bibNumber"`) {
+		t.Fatal("race page should render a bib number input for checkpoint entry")
+	}
+	if !strings.Contains(raceRes.Body.String(), `Next checkpoint (automatic)`) {
+		t.Fatal("race page checkpoint entry should default to the dynamic next checkpoint")
 	}
 	if !strings.Contains(raceRes.Body.String(), `id="chest-reader-start"`) {
 		t.Fatal("race page should render the chest reader scan button")

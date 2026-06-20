@@ -32,14 +32,21 @@ const (
 )
 
 var (
-	ErrInvalidParticipant = errors.New("participant name and phone number are required")
+	ErrInvalidParticipant = errors.New("a bib number or runner name is required")
 	ErrInvalidBib         = errors.New("bib number was not found")
 	ErrInvalidCheckpoint  = errors.New("checkpoint was not found")
 	ErrDuplicateEntry     = errors.New("checkpoint already recorded for this runner")
 	ErrOutOfOrderEntry    = errors.New("previous checkpoint must be recorded first")
+	ErrRaceComplete       = errors.New("runner has already reached the final checkpoint")
+	ErrBibLocked          = errors.New("bib was just recorded; locked for a few minutes")
 )
 
 var nonCheckpointIDChars = regexp.MustCompile(`[^a-z0-9]+`)
+
+// raceStartVolunteerID marks Start checkpoints recorded automatically by StartRace.
+// These do not arm the post-checkpoint bib lock so a fast runner reaching the
+// first checkpoint right after the gun is never blocked.
+const raceStartVolunteerID = "race-start"
 
 type Event struct {
 	ID           string      `json:"id"`
@@ -273,39 +280,64 @@ func (s *Service) UpdateEventSettings(distanceKM int, startTime time.Time) (Even
 }
 
 func (s *Service) StartRace() (Event, error) {
+	return s.StartRaceCategory("")
+}
+
+// StartRaceCategory marks the race active and records the Start checkpoint for
+// its registered runners. When category is empty every runner is started;
+// otherwise only runners in that category begin, so categories can be flagged
+// off at different times (staggered gun times).
+func (s *Service) StartRaceCategory(category string) (Event, error) {
+	category = strings.TrimSpace(category)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	if s.event.Status == EventStatusCompleted {
 		s.mu.Unlock()
 		return Event{}, errors.New("completed races cannot be started")
 	}
+	if category != "" && !s.hasCategoryLocked(category) {
+		s.mu.Unlock()
+		return Event{}, fmt.Errorf("unknown category %q", category)
+	}
 
 	var startedAt time.Time
 	switch {
-	case s.event.Status == EventStatusActive && !s.event.StartTime.IsZero():
-		// Already running: keep the established start time so re-starting is idempotent.
+	case category == "" && s.event.Status == EventStatusActive && !s.event.StartTime.IsZero():
+		// Already running: re-starting the whole race keeps the established time.
 		startedAt = s.event.StartTime.UTC()
 	case !s.event.StartTime.IsZero():
-		// Honor this race's scheduled start time, but if the admin starts it after
-		// that time the real click moment becomes the gun time (late start).
+		// Honor the scheduled start time, but a late start uses the click moment.
 		startedAt = s.event.StartTime.UTC()
 		if now.After(startedAt) {
 			startedAt = now
 		}
-		s.event.StartTime = startedAt
 	default:
 		// No scheduled time configured: start now.
 		startedAt = now
+	}
+
+	// The event's baseline start time is fixed by the first start; later
+	// category starts keep their own per-runner timestamps without moving it.
+	if s.event.StartTime.IsZero() || (category == "" && s.event.Status != EventStatusActive) {
 		s.event.StartTime = startedAt
 	}
 	s.event.Status = EventStatusActive
-	s.recordStartCheckpointForRegisteredParticipantsLocked(startedAt)
+	s.recordStartCheckpointForRegisteredParticipantsLocked(startedAt, category)
 	state := s.stateLocked()
 	store := s.store
 	updated := s.event
 	s.mu.Unlock()
 	persist(store, state)
 	return updated, nil
+}
+
+func (s *Service) hasCategoryLocked(category string) bool {
+	for _, c := range s.event.Categories {
+		if strings.EqualFold(strings.TrimSpace(c), category) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (Checkpoint, error) {
@@ -356,19 +388,35 @@ func (s *Service) AddCheckpoint(name string, sequence int, distanceKM float64) (
 }
 
 func (s *Service) RegisterParticipant(name, phone, category, notes string) (Participant, error) {
+	return s.RegisterParticipantWithBib("", name, phone, category, notes)
+}
+
+// RegisterParticipantWithBib registers a runner under a specific bib number. When
+// bib is empty a sequential bib is generated. Name and phone are optional so a
+// volunteer can register a walk-up runner by typing only the bib number after
+// selecting the race; the category is supplied by the caller from the race.
+func (s *Service) RegisterParticipantWithBib(bib, name, phone, category, notes string) (Participant, error) {
+	bib = normalizeBib(bib)
 	name = strings.TrimSpace(name)
 	phone = strings.TrimSpace(phone)
 	category = strings.TrimSpace(category)
 	notes = strings.TrimSpace(notes)
-	if name == "" || phone == "" {
+	if bib == "" && name == "" {
 		return Participant{}, ErrInvalidParticipant
 	}
 
 	s.mu.Lock()
+	if bib == "" {
+		bib = fmt.Sprintf("BIB-%03d", s.nextParticipant)
+	}
+	if _, exists := s.participantByBib[bib]; exists {
+		s.mu.Unlock()
+		return Participant{}, fmt.Errorf("%s is already registered in this race", bib)
+	}
 
 	participant := Participant{
 		ID:          fmt.Sprintf("runner-%03d", s.nextParticipant),
-		BibNumber:   fmt.Sprintf("BIB-%03d", s.nextParticipant),
+		BibNumber:   bib,
 		Name:        name,
 		PhoneNumber: phone,
 		Category:    category,
@@ -377,8 +425,12 @@ func (s *Service) RegisterParticipant(name, phone, category, notes string) (Part
 		CreatedAt:   time.Now().UTC(),
 	}
 	s.participants = append(s.participants, participant)
-	s.participantByBib[participant.BibNumber] = len(s.participants) - 1
-	s.nextParticipant++
+	s.participantByBib[bib] = len(s.participants) - 1
+	if n := bibNumber(bib); n >= s.nextParticipant {
+		s.nextParticipant = n + 1
+	} else {
+		s.nextParticipant++
+	}
 	state := s.stateLocked()
 	store := s.store
 	s.mu.Unlock()
@@ -490,12 +542,49 @@ func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, 
 	return log, nil
 }
 
-func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.Time) {
+// RecordNextCheckpoint advances a runner to their next checkpoint in course
+// order, so a volunteer only needs to type the bib number. It errors if the
+// runner is unknown or has already reached the final checkpoint.
+func (s *Service) RecordNextCheckpoint(bibNumber, volunteerID string, at time.Time) (CheckpointLog, error) {
+	bibNumber = normalizeBib(bibNumber)
+
+	s.mu.RLock()
+	nextID, err := s.nextCheckpointIDLocked(bibNumber)
+	s.mu.RUnlock()
+	if err != nil {
+		return CheckpointLog{}, err
+	}
+	return s.RecordCheckpoint(bibNumber, nextID, volunteerID, at)
+}
+
+func (s *Service) nextCheckpointIDLocked(bibNumber string) (string, error) {
+	if _, ok := s.participantByBib[bibNumber]; !ok {
+		return "", ErrInvalidBib
+	}
+	if len(s.checkpoints) == 0 {
+		return "", ErrInvalidCheckpoint
+	}
+	lastSequence := 0
+	for _, log := range s.logsForBibLocked(bibNumber) {
+		if log.Checkpoint.Sequence > lastSequence {
+			lastSequence = log.Checkpoint.Sequence
+		}
+	}
+	for _, checkpoint := range s.checkpoints {
+		if checkpoint.Sequence > lastSequence {
+			return checkpoint.ID, nil
+		}
+	}
+	return "", ErrRaceComplete
+}
+
+func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.Time, category string) {
 	startCheckpoint, ok := s.startCheckpointLocked()
 	if !ok {
 		return
 	}
 	startAt := at.UTC()
+	category = strings.TrimSpace(category)
 
 	recorded := make(map[string]bool, len(s.logs))
 	for _, log := range s.logs {
@@ -509,6 +598,9 @@ func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.T
 		if participant.Status == RaceStatusFinished || recorded[participant.BibNumber] {
 			continue
 		}
+		if category != "" && !strings.EqualFold(strings.TrimSpace(participant.Category), category) {
+			continue
+		}
 		participant.Status = RaceStatusStarted
 		s.participants[i] = participant
 		log := CheckpointLog{
@@ -517,7 +609,7 @@ func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.T
 			Participant: participant,
 			Checkpoint:  startCheckpoint,
 			Timestamp:   startAt,
-			VolunteerID: "race-start",
+			VolunteerID: raceStartVolunteerID,
 		}
 		log.DisplayLabel = fmt.Sprintf("%s reached %s", participant.BibNumber, startCheckpoint.Name)
 		s.logs = append(s.logs, log)
@@ -654,6 +746,14 @@ func (s *Service) validateCheckpointLocked(bibNumber string, checkpoint Checkpoi
 	}
 	if at.UTC().Before(last.Timestamp.UTC()) {
 		return ErrOutOfOrderEntry
+	}
+	// Once a volunteer records a bib, lock it for the duplicate window so an
+	// accidental re-scan can't push the runner to the next checkpoint. The
+	// automatic Start record (race-start) is exempt.
+	if s.duplicateWindow > 0 && last.VolunteerID != raceStartVolunteerID {
+		if elapsed := at.UTC().Sub(last.Timestamp.UTC()); elapsed < s.duplicateWindow {
+			return fmt.Errorf("%w; %s remaining", ErrBibLocked, formatDuration(s.duplicateWindow-elapsed))
+		}
 	}
 	return nil
 }
