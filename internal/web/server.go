@@ -755,7 +755,7 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 
 	created := make([]race.Event, 0, len(prepared))
 	for _, p := range prepared {
-		service := race.NewService(p.event, p.checkpoints, nil, 10*time.Minute)
+		service := race.NewService(p.event, p.checkpoints, nil, 5*time.Minute)
 		if err := service.UseStore(s.projectStore); err != nil {
 			writeProblem(w, http.StatusInternalServerError, "marathon project could not be saved")
 			return
