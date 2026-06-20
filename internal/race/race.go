@@ -515,6 +515,35 @@ func (s *Service) RegisterParticipantWithBib(bib, name, phone, category, notes s
 	return participant, nil
 }
 
+func (s *Service) UpdateParticipant(bib, name, phone, notes string) (Participant, error) {
+	bib = normalizeBib(bib)
+	if bib == "" {
+		return Participant{}, ErrInvalidBib
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, ok := s.participantByBib[bib]
+	if !ok {
+		return Participant{}, ErrInvalidBib
+	}
+	p := s.participants[idx]
+	if name != "" {
+		p.Name = strings.TrimSpace(name)
+	}
+	if phone != "" {
+		p.PhoneNumber = strings.TrimSpace(phone)
+	}
+	if notes != "" {
+		p.Notes = strings.TrimSpace(notes)
+	}
+	s.participants[idx] = p
+	state := s.stateLocked()
+	store := s.store
+	persist(store, state)
+	return p, nil
+}
+
+
 func (s *Service) DeleteParticipant(bibNumber string) error {
 	bibNumber = normalizeBib(bibNumber)
 	if bibNumber == "" {
@@ -1267,6 +1296,24 @@ func (s *Service) stateLocked() State {
 		Participants: append([]Participant(nil), s.participants...),
 		Logs:         append([]CheckpointLog(nil), s.logs...),
 	}
+}
+
+func (s *Service) CheckpointByID(id string) (Checkpoint, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cp, ok := s.checkpointByID[id]
+	return cp, ok
+}
+
+func (s *Service) CheckpointByName(name string) (Checkpoint, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, cp := range s.checkpoints {
+		if strings.EqualFold(cp.Name, name) {
+			return cp, true
+		}
+	}
+	return Checkpoint{}, false
 }
 
 func persist(store Store, state State) {

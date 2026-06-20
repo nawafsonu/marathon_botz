@@ -248,6 +248,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	activeID := ""
 	if service != nil {
 		snapshot = service.Snapshot()
+		if service.Event().MarathonID != "" {
+			snapshot.LiveFeed = s.marathonLiveFeed(service.Event().MarathonID)
+		}
 		basePath = s.basePathFor(service.Event().ID)
 		activeID = service.Event().ID
 	}
@@ -280,6 +283,10 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	snapshot := service.Snapshot()
+	if service.Event().MarathonID != "" {
+		snapshot.LiveFeed = s.marathonLiveFeed(service.Event().MarathonID)
+	}
 	data := struct {
 		Snapshot           race.Snapshot
 		Projects           []projectSummary
@@ -289,7 +296,7 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 		CanManage          bool
 		ChestReaderEnabled bool
 	}{
-		Snapshot:           service.Snapshot(),
+		Snapshot:           snapshot,
 		Projects:           s.projectSummaries(service.Event().ID),
 		BasePath:           s.basePathFor(service.Event().ID),
 		User:               s.currentUser(r),
@@ -307,6 +314,10 @@ func (s *Server) leaderboardPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	snapshot := service.Snapshot()
+	if service.Event().MarathonID != "" {
+		snapshot.LiveFeed = s.marathonLiveFeed(service.Event().MarathonID)
+	}
 	data := struct {
 		Snapshot    race.Snapshot
 		Projects    []projectSummary
@@ -314,7 +325,7 @@ func (s *Server) leaderboardPage(w http.ResponseWriter, r *http.Request) {
 		User        auth.User
 		AuthEnabled bool
 	}{
-		Snapshot:    service.Snapshot(),
+		Snapshot:    snapshot,
 		Projects:    s.projectSummaries(service.Event().ID),
 		BasePath:    s.basePathFor(service.Event().ID),
 		User:        s.currentUser(r),
@@ -858,6 +869,9 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := service.Snapshot()
+	if service.Event().MarathonID != "" {
+		snapshot.LiveFeed = s.marathonLiveFeed(service.Event().MarathonID)
+	}
 	// Inject in-memory station status into each checkpoint.
 	eventID := service.Event().ID
 	s.stationMu.RLock()
@@ -1139,10 +1153,11 @@ func (s *Server) setStationStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
-	service, ok := s.serviceForRequest(w, r)
+	activeService, ok := s.serviceForRequest(w, r)
 	if !ok {
 		return
 	}
+	service := activeService
 	var input struct {
 		BibNumber     string `json:"bibNumber"`
 		ParticipantID string `json:"participantId"`
@@ -1156,7 +1171,7 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 	bibNumber := strings.TrimSpace(input.BibNumber)
 	participantID := strings.TrimSpace(input.ParticipantID)
 	if bibNumber == "" && participantID != "" {
-		participant, found := participantByID(service.Participants(), participantID)
+		participant, found := participantByID(activeService.Participants(), participantID)
 		if !found {
 			writeProblem(w, http.StatusNotFound, "selected runner was not found")
 			return
@@ -1164,7 +1179,7 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		bibNumber = participant.BibNumber
 	}
 	if bibNumber != "" {
-		if targetService, found := s.findServiceForBib(service.Event().MarathonID, bibNumber); found {
+		if targetService, found := s.findServiceForBib(activeService.Event().MarathonID, bibNumber); found {
 			service = targetService
 		}
 	}
@@ -1177,7 +1192,25 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(input.CheckpointID) == "" {
 		log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, time.Now().UTC())
 	} else {
-		log, err = service.RecordCheckpoint(bibNumber, input.CheckpointID, input.VolunteerID, time.Now().UTC())
+		targetCheckpointID := input.CheckpointID
+		if service.Event().ID != activeService.Event().ID {
+			// Find the name of the checkpoint in the active service
+			if activeCP, found := activeService.CheckpointByID(input.CheckpointID); found {
+				// Find a checkpoint in the target service with the same name
+				if targetCP, found := service.CheckpointByName(activeCP.Name); found {
+					targetCheckpointID = targetCP.ID
+				} else {
+					// Fallback to next automatic checkpoint if no name matches
+					targetCheckpointID = ""
+				}
+			}
+		}
+
+		if targetCheckpointID == "" {
+			log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, time.Now().UTC())
+		} else {
+			log, err = service.RecordCheckpoint(bibNumber, targetCheckpointID, input.VolunteerID, time.Now().UTC())
+		}
 	}
 	if err != nil {
 		writeProblem(w, statusForRaceError(err), err.Error())
@@ -1619,6 +1652,29 @@ func (s *Server) marathonParticipants(marathonID string) []race.Participant {
 		}
 	}
 	return participants
+}
+
+func (s *Server) marathonLiveFeed(marathonID string) []race.CheckpointLog {
+	if marathonID == "" {
+		return nil
+	}
+	s.projects.mu.RLock()
+	var mergedLogs []race.CheckpointLog
+	for _, id := range s.projects.ids {
+		service := s.projects.services[id]
+		if service.Event().MarathonID == marathonID {
+			mergedLogs = append(mergedLogs, service.RecentLogs(0)...)
+		}
+	}
+	s.projects.mu.RUnlock()
+
+	sort.Slice(mergedLogs, func(i, j int) bool {
+		return mergedLogs[i].Timestamp.After(mergedLogs[j].Timestamp)
+	})
+	if len(mergedLogs) > 12 {
+		mergedLogs = mergedLogs[:12]
+	}
+	return mergedLogs
 }
 
 func (s *Server) addProject(id string, service *race.Service) error {
