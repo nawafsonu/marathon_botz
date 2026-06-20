@@ -614,6 +614,17 @@ func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, 
 		s.mu.Unlock()
 		return CheckpointLog{}, ErrInvalidCheckpoint
 	}
+
+	// Ensure the checkpoint timestamp is not before the last recorded checkpoint's timestamp
+	// to prevent ErrOutOfOrderEntry due to clock skew or future race starts.
+	logs := s.logsForBibLocked(bibNumber)
+	if len(logs) > 0 {
+		last := logs[len(logs)-1]
+		if at.UTC().Before(last.Timestamp.UTC()) {
+			at = last.Timestamp.UTC().Add(time.Second)
+		}
+	}
+
 	if err := s.validateCheckpointLocked(bibNumber, checkpoint, at); err != nil {
 		s.mu.Unlock()
 		return CheckpointLog{}, err
@@ -1314,6 +1325,33 @@ func (s *Service) CheckpointByName(name string) (Checkpoint, bool) {
 		}
 	}
 	return Checkpoint{}, false
+}
+
+func (s *Service) Reload(state State) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.event = state.Event
+	s.checkpoints = state.Checkpoints
+	s.checkpointByID = make(map[string]Checkpoint, len(state.Checkpoints))
+	for _, cp := range state.Checkpoints {
+		s.checkpointByID[cp.ID] = cp
+	}
+	s.participants = state.Participants
+	s.participantByBib = make(map[string]int, len(state.Participants))
+	s.nextParticipant = 1
+	for i, p := range state.Participants {
+		s.participantByBib[p.BibNumber] = i
+		if n := bibNumber(p.BibNumber); n >= s.nextParticipant {
+			s.nextParticipant = n + 1
+		}
+	}
+	s.logs = state.Logs
+	s.nextLog = 1
+	for _, log := range state.Logs {
+		if n := logNumber(log.ID); n >= s.nextLog {
+			s.nextLog = n + 1
+		}
+	}
 }
 
 func persist(store Store, state State) {

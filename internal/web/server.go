@@ -243,6 +243,10 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.canManage(r) && service != nil {
+		http.Redirect(w, r, s.basePathFor(service.Event().ID)+"/race", http.StatusSeeOther)
+		return
+	}
 	snapshot := race.Snapshot{}
 	basePath := ""
 	activeID := ""
@@ -324,12 +328,14 @@ func (s *Server) leaderboardPage(w http.ResponseWriter, r *http.Request) {
 		BasePath    string
 		User        auth.User
 		AuthEnabled bool
+		CanManage   bool
 	}{
 		Snapshot:    snapshot,
 		Projects:    s.projectSummaries(service.Event().ID),
 		BasePath:    s.basePathFor(service.Event().ID),
 		User:        s.currentUser(r),
 		AuthEnabled: s.authManager != nil,
+		CanManage:   s.canManage(r),
 	}
 	if err := s.templates.ExecuteTemplate(w, "leaderboard.html", data); err != nil {
 		http.Error(w, "leaderboard could not be rendered", http.StatusInternalServerError)
@@ -1557,6 +1563,21 @@ func newProjectRegistry(service *race.Service) *projectRegistry {
 	}
 }
 
+func (s *Server) reloadServiceState(service *race.Service) {
+	if s.projectStore == nil || service == nil {
+		return
+	}
+	if loader, ok := s.projectStore.(interface {
+		LoadByID(ctx context.Context, id string) (race.State, bool, error)
+	}); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if state, found, err := loader.LoadByID(ctx, service.Event().ID); err == nil && found {
+			service.Reload(state)
+		}
+	}
+}
+
 func (s *Server) serviceForRequest(w http.ResponseWriter, r *http.Request) (*race.Service, bool) {
 	eventID := r.PathValue("eventID")
 	if eventID == "" {
@@ -1564,6 +1585,7 @@ func (s *Server) serviceForRequest(w http.ResponseWriter, r *http.Request) (*rac
 			http.NotFound(w, r)
 			return nil, false
 		}
+		s.reloadServiceState(s.service)
 		return s.service, true
 	}
 	s.projects.mu.RLock()
@@ -1573,6 +1595,7 @@ func (s *Server) serviceForRequest(w http.ResponseWriter, r *http.Request) (*rac
 		http.NotFound(w, r)
 		return nil, false
 	}
+	s.reloadServiceState(service)
 	return service, true
 }
 
@@ -1847,7 +1870,7 @@ func (s *Server) canManage(r *http.Request) bool {
 		return true
 	}
 	user, ok := s.authenticatedUser(r)
-	return ok && (user.Role == auth.RoleAdmin || user.Role == auth.RoleVolunteer)
+	return ok && user.Role == auth.RoleAdmin
 }
 
 func (s *Server) authenticatedUser(r *http.Request) (auth.User, bool) {

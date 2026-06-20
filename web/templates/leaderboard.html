@@ -10,13 +10,13 @@
 <body class="leaderboard-page">
   <div class="leaderboard-shell app-shell" data-page="leaderboard" data-base-path="{{.BasePath}}">
     <header class="leaderboard-topbar">
-      <a class="leaderboard-brand" href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}" aria-label="Marathon Tracker dashboard">
+      <a class="leaderboard-brand" href="{{if .CanManage}}{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}{{else}}{{.BasePath}}/race{{end}}" aria-label="Marathon Tracker dashboard">
         <span class="brand-mark">MT</span>
         <span>Marathon Tracker</span>
       </a>
       <nav aria-label="Leaderboard navigation">
-        <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
-        <a href="{{.BasePath}}/race">Race Control</a>
+        {{if .CanManage}}<a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>{{end}}
+        <a href="{{.BasePath}}/race">Race</a>
         <a class="active" href="{{.BasePath}}/leaderboard" aria-current="page">Leaderboard</a>
       </nav>
       {{if .AuthEnabled}}

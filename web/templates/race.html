@@ -12,11 +12,11 @@
     <aside class="rail" aria-label="Primary navigation">
       <div class="brand-mark">MT</div>
       <nav>
-        <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
+        {{if .CanManage}}<a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>{{end}}
         <a class="active" href="{{.BasePath}}/race">Race</a>
         <a href="{{.BasePath}}/leaderboard">Leaderboard</a>
         {{if .CanManage}}<a href="{{.BasePath}}/certificates">Certificates</a>{{end}}
-        <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
+        {{if .CanManage}}<a href="{{.BasePath}}/reports/final.csv">Export CSV</a>{{end}}
       </nav>
       {{if .AuthEnabled}}
         <form method="post" action="/logout" class="logout-form">
@@ -102,24 +102,7 @@
         </section>
       </section>
 
-      {{if not .CanManage}}
-      <section class="panel race-selector-panel volunteer-race-selector" aria-label="Select race">
-        <div class="section-heading">
-          <div>
-            <h2>Select Race</h2>
-            <p>Switch category to filter stats and checkpoints</p>
-          </div>
-        </div>
-        <label>
-          Race
-          <select id="race-selector-volunteer" name="eventID" aria-label="Select race" data-navigation-select>
-            {{range .Projects}}
-              <option value="{{.RaceURL}}" {{if .Active}}selected{{end}}>{{.Name}}</option>
-            {{end}}
-          </select>
-        </label>
-      </section>
-      {{end}}
+
 
       <section class="race-grid">
         <section id="checkpoint-entry" class="panel checkpoint-panel race-entry-panel">

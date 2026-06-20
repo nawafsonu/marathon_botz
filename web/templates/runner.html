@@ -9,7 +9,7 @@
 </head>
 <body>
   <main class="runner-page">
-    <a class="back-link" href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Back to dashboard</a>
+    <a class="back-link" href="{{if .CanManage}}{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}{{else}}{{.BasePath}}/race{{end}}">Back to {{if .CanManage}}dashboard{{else}}Race{{end}}</a>
     <section class="runner-hero">
       <div>
         <p>{{.Event.Name}}</p>
