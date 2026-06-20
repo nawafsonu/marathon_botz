@@ -42,15 +42,17 @@ var (
 var nonCheckpointIDChars = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Event struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Date        time.Time   `json:"date"`
-	StartTime   time.Time   `json:"startTime"`
-	Location    string      `json:"location"`
-	DistanceKM  int         `json:"distanceKm"`
-	Categories  []string    `json:"categories"`
-	Status      EventStatus `json:"status"`
+	ID           string      `json:"id"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	Date         time.Time   `json:"date"`
+	StartTime    time.Time   `json:"startTime"`
+	Location     string      `json:"location"`
+	DistanceKM   int         `json:"distanceKm"`
+	Categories   []string    `json:"categories"`
+	Status       EventStatus `json:"status"`
+	MarathonID   string      `json:"marathonId"`
+	MarathonName string      `json:"marathonName"`
 }
 
 type Checkpoint struct {
@@ -271,15 +273,29 @@ func (s *Service) UpdateEventSettings(distanceKM int, startTime time.Time) (Even
 }
 
 func (s *Service) StartRace() (Event, error) {
-	startedAt := time.Now().UTC()
+	now := time.Now().UTC()
 	s.mu.Lock()
 	if s.event.Status == EventStatusCompleted {
 		s.mu.Unlock()
 		return Event{}, errors.New("completed races cannot be started")
 	}
-	if s.event.Status == EventStatusActive && !s.event.StartTime.IsZero() {
+
+	var startedAt time.Time
+	switch {
+	case s.event.Status == EventStatusActive && !s.event.StartTime.IsZero():
+		// Already running: keep the established start time so re-starting is idempotent.
 		startedAt = s.event.StartTime.UTC()
-	} else {
+	case !s.event.StartTime.IsZero():
+		// Honor this race's scheduled start time, but if the admin starts it after
+		// that time the real click moment becomes the gun time (late start).
+		startedAt = s.event.StartTime.UTC()
+		if now.After(startedAt) {
+			startedAt = now
+		}
+		s.event.StartTime = startedAt
+	default:
+		// No scheduled time configured: start now.
+		startedAt = now
 		s.event.StartTime = startedAt
 	}
 	s.event.Status = EventStatusActive
@@ -1005,6 +1021,33 @@ func normalizeBib(value string) string {
 
 func NormalizeBib(value string) string {
 	return normalizeBib(value)
+}
+
+// GenerateCheckpoints builds an evenly spaced course: a Start at 0 km, the
+// requested number of intermediate checkpoints (CP1..CPn), and a Finish at the
+// full distance. A negative intermediate count is treated as zero, yielding just
+// Start and Finish.
+func GenerateCheckpoints(distanceKM float64, intermediate int) []Checkpoint {
+	if intermediate < 0 {
+		intermediate = 0
+	}
+	if distanceKM < 0 {
+		distanceKM = 0
+	}
+	checkpoints := make([]Checkpoint, 0, intermediate+2)
+	checkpoints = append(checkpoints, Checkpoint{ID: "start", Name: "Start", Sequence: 1, DistanceKM: 0})
+	step := distanceKM / float64(intermediate+1)
+	for i := 1; i <= intermediate; i++ {
+		name := fmt.Sprintf("CP%d", i)
+		checkpoints = append(checkpoints, Checkpoint{
+			ID:         checkpointID(name),
+			Name:       name,
+			Sequence:   i + 1,
+			DistanceKM: step * float64(i),
+		})
+	}
+	checkpoints = append(checkpoints, Checkpoint{ID: "finish", Name: "Finish", Sequence: intermediate + 2, DistanceKM: distanceKM})
+	return checkpoints
 }
 
 func checkpointID(name string) string {

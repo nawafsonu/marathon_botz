@@ -933,6 +933,80 @@ func TestEachMarathonProjectHasIsolatedParticipants(t *testing.T) {
 	}
 }
 
+func TestCreateMarathonWithMultipleIndependentRaces(t *testing.T) {
+	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)
+	handler := NewServer(svc, WithProjectStore(&memoryProjectStore{}))
+
+	payload := []byte(`{"name":"Spring Marathon 2026","location":"Pune","races":[` +
+		`{"name":"5 KM","distanceKm":5,"startTime":"2026-03-01T06:00:00Z","checkpoints":1},` +
+		`{"name":"21 KM","distanceKm":21,"startTime":"2026-03-01T06:30:00Z","checkpoints":3}]}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(payload))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRes := httptest.NewRecorder()
+	handler.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create marathon status = %d, want 201; body: %s", createRes.Code, createRes.Body.String())
+	}
+
+	var created struct {
+		MarathonID   string       `json:"marathonId"`
+		MarathonName string       `json:"marathonName"`
+		Races        []race.Event `json:"races"`
+	}
+	if err := json.NewDecoder(createRes.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.MarathonID != "spring-marathon-2026" {
+		t.Fatalf("marathonId = %q, want spring-marathon-2026", created.MarathonID)
+	}
+	if len(created.Races) != 2 {
+		t.Fatalf("created %d races, want 2", len(created.Races))
+	}
+	for _, r := range created.Races {
+		if r.MarathonID != created.MarathonID {
+			t.Fatalf("race %s marathonId = %q, want %q", r.ID, r.MarathonID, created.MarathonID)
+		}
+		if r.MarathonName != "Spring Marathon 2026" {
+			t.Fatalf("race %s marathonName = %q", r.ID, r.MarathonName)
+		}
+	}
+	if created.Races[0].ID == created.Races[1].ID {
+		t.Fatalf("races share id %q, want distinct ids", created.Races[0].ID)
+	}
+
+	// Each race owns an independent course with the requested number of
+	// checkpoints: Start + N intermediate + Finish.
+	cases := []struct {
+		id              string
+		distance        int
+		wantCheckpoints int
+	}{
+		{"spring-marathon-2026-5-km", 5, 3},
+		{"spring-marathon-2026-21-km", 21, 5},
+	}
+	for _, tc := range cases {
+		stateReq := httptest.NewRequest(http.MethodGet, "/events/"+tc.id+"/api/state", nil)
+		stateRes := httptest.NewRecorder()
+		handler.ServeHTTP(stateRes, stateReq)
+		if stateRes.Code != http.StatusOK {
+			t.Fatalf("state for %s = %d, want 200; body: %s", tc.id, stateRes.Code, stateRes.Body.String())
+		}
+		var snapshot race.Snapshot
+		if err := json.NewDecoder(stateRes.Body).Decode(&snapshot); err != nil {
+			t.Fatalf("decode state for %s: %v", tc.id, err)
+		}
+		if snapshot.Event.DistanceKM != tc.distance {
+			t.Fatalf("%s distance = %d, want %d", tc.id, snapshot.Event.DistanceKM, tc.distance)
+		}
+		if len(snapshot.Checkpoints) != tc.wantCheckpoints {
+			t.Fatalf("%s has %d checkpoints, want %d", tc.id, len(snapshot.Checkpoints), tc.wantCheckpoints)
+		}
+		if snapshot.Checkpoints[0].ID != "start" || snapshot.Checkpoints[len(snapshot.Checkpoints)-1].ID != "finish" {
+			t.Fatalf("%s course must start at start and end at finish", tc.id)
+		}
+	}
+}
+
 func testService(t *testing.T) *race.Service {
 	t.Helper()
 	svc := race.NewService(testEvent(), testCheckpoints(), nil, 10*time.Minute)

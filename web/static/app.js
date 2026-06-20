@@ -429,21 +429,81 @@ eventSettingsForm?.addEventListener("submit", async (event) => {
   }
 });
 
+const raceRows = document.querySelector("#race-rows");
+const addRaceRowButton = document.querySelector("#add-race-row");
+
+function syncRemoveRaceButtons() {
+  if (!raceRows) return;
+  const rows = raceRows.querySelectorAll(".race-row");
+  rows.forEach((row) => {
+    const remove = row.querySelector("[data-remove-race]");
+    if (remove) remove.disabled = rows.length <= 1;
+  });
+}
+
+addRaceRowButton?.addEventListener("click", () => {
+  if (!raceRows) return;
+  const first = raceRows.querySelector(".race-row");
+  if (!first) return;
+  const clone = first.cloneNode(true);
+  clone.querySelectorAll("input").forEach((input) => {
+    if (input.name === "raceCheckpoints") {
+      input.value = "2";
+    } else {
+      input.value = "";
+    }
+  });
+  raceRows.appendChild(clone);
+  syncRemoveRaceButtons();
+  clone.querySelector("input")?.focus();
+});
+
+raceRows?.addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-remove-race]");
+  if (!remove) return;
+  const rows = raceRows.querySelectorAll(".race-row");
+  if (rows.length <= 1) return;
+  remove.closest(".race-row")?.remove();
+  syncRemoveRaceButtons();
+});
+
+syncRemoveRaceButtons();
+
 eventCreateForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const races = [];
+  for (const row of raceRows?.querySelectorAll(".race-row") ?? []) {
+    const name = row.querySelector("[name='raceName']")?.value.trim();
+    const distance = Number(row.querySelector("[name='raceDistance']")?.value);
+    const startRaw = row.querySelector("[name='raceStart']")?.value;
+    const checkpoints = Number(row.querySelector("[name='raceCheckpoints']")?.value);
+    if (!name || !startRaw) continue;
+    races.push({
+      name,
+      distanceKm: distance,
+      startTime: new Date(startRaw).toISOString(),
+      checkpoints: Number.isFinite(checkpoints) ? checkpoints : 0,
+    });
+  }
+  if (races.length === 0) {
+    setStatus(eventCreateStatus, "Add at least one race with a name and start time.", "error");
+    return;
+  }
   const form = new FormData(eventCreateForm);
-  const categories = form.getAll("categories").filter(Boolean);
   setStatus(eventCreateStatus, "Creating marathon...");
   try {
     const created = await postJSON("/api/events", {
       name: form.get("name"),
       location: form.get("location"),
-      distanceKm: Number(form.get("distanceKm")),
-      startTime: new Date(form.get("startTime")).toISOString(),
-      categories,
+      races,
     });
-    setStatus(eventCreateStatus, `${created.name} created.`, "success");
-    window.location.href = `/events/${encodeURIComponent(created.id)}`;
+    const firstRace = created.races?.[0];
+    setStatus(eventCreateStatus, `${created.marathonName} created with ${created.races?.length ?? 0} race(s).`, "success");
+    if (firstRace?.id) {
+      window.location.href = `/events/${encodeURIComponent(firstRace.id)}`;
+    } else {
+      window.location.reload();
+    }
   } catch (error) {
     setStatus(eventCreateStatus, error.message, "error");
   }
@@ -755,17 +815,51 @@ function escapeHTML(value) {
 hydrateEventSettings();
 hydrateDisplayedEventTime();
 
-// Category filter tabs (leaderboard)
-document.querySelectorAll("#leaderboard-tabs .tab-btn").forEach((btn) => {
+// Category filter tabs (leaderboard) — manual selection plus a 10s auto-rotation
+// that cycles All → each category → repeat, so a display board surfaces every
+// category without anyone clicking.
+const leaderboardTabs = Array.from(document.querySelectorAll("#leaderboard-tabs .tab-btn"));
+let _leaderboardRotation = null;
+
+function activateLeaderboardTab(btn) {
+  if (!btn) return;
+  leaderboardTabs.forEach((b) => {
+    const isActive = b === btn;
+    b.classList.toggle("active", isActive);
+    b.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+  applyLeaderboardFilter(btn.dataset.category || "");
+}
+
+function startLeaderboardRotation() {
+  if (_leaderboardRotation || leaderboardTabs.length < 2) return;
+  _leaderboardRotation = setInterval(() => {
+    const current = leaderboardTabs.findIndex((b) => b.classList.contains("active"));
+    const next = leaderboardTabs[(current + 1) % leaderboardTabs.length];
+    activateLeaderboardTab(next);
+  }, 10000);
+}
+
+function stopLeaderboardRotation() {
+  if (!_leaderboardRotation) return;
+  clearInterval(_leaderboardRotation);
+  _leaderboardRotation = null;
+}
+
+leaderboardTabs.forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll("#leaderboard-tabs .tab-btn").forEach((b) => {
-      b.classList.remove("active");
-      b.setAttribute("aria-selected", "false");
-    });
-    btn.classList.add("active");
-    btn.setAttribute("aria-selected", "true");
-    applyLeaderboardFilter(btn.dataset.category || "");
+    activateLeaderboardTab(btn);
+    // A manual pick gets a fresh dwell rather than jumping at the next tick.
+    stopLeaderboardRotation();
+    startLeaderboardRotation();
   });
 });
+
+// Pause rotation while someone is reading the standings, resume when they leave.
+const leaderboardStage = document.querySelector("#leaderboard");
+leaderboardStage?.addEventListener("mouseenter", stopLeaderboardRotation);
+leaderboardStage?.addEventListener("mouseleave", startLeaderboardRotation);
+
+startLeaderboardRotation();
 
 setInterval(refreshState, 5000);

@@ -57,6 +57,8 @@ type projectSummary struct {
 	DashboardURL   string `json:"dashboardUrl"`
 	RaceURL        string `json:"raceUrl"`
 	LeaderboardURL string `json:"leaderboardUrl"`
+	MarathonID     string `json:"marathonId"`
+	MarathonName   string `json:"marathonName"`
 }
 
 type sessionRecord struct {
@@ -610,13 +612,22 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.projectSummaries(s.projects.activeID))
 }
 
+type raceInput struct {
+	Name        string `json:"name"`
+	DistanceKM  int    `json:"distanceKm"`
+	StartTime   string `json:"startTime"`
+	Checkpoints int    `json:"checkpoints"`
+}
+
 func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
 	var input struct {
-		Name       string   `json:"name"`
-		Location   string   `json:"location"`
+		Name     string      `json:"name"`
+		Location string      `json:"location"`
+		Races    []raceInput `json:"races"`
+		// Legacy single-race fields, kept so older clients keep working.
 		DistanceKM int      `json:"distanceKm"`
 		StartTime  string   `json:"startTime"`
 		Categories []string `json:"categories"`
@@ -625,50 +636,133 @@ func (s *Server) createEvent(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return
 	}
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		writeProblem(w, http.StatusUnprocessableEntity, "marathon name is required")
-		return
-	}
-	if input.DistanceKM <= 0 {
-		writeProblem(w, http.StatusUnprocessableEntity, "distance must be greater than zero")
-		return
-	}
-	start, err := time.Parse(time.RFC3339, input.StartTime)
-	if err != nil {
-		writeProblem(w, http.StatusUnprocessableEntity, "start time must be an RFC3339 timestamp")
-		return
-	}
-	categories := filterCategories(input.Categories)
-	if len(categories) == 0 {
-		categories = defaultCategories(input.DistanceKM)
-	}
-	id := slugify(name)
-	event := race.Event{
-		ID:          id,
-		Name:        name,
-		Description: "Marathon project",
-		Date:        start,
-		StartTime:   start,
-		Location:    strings.TrimSpace(input.Location),
-		DistanceKM:  input.DistanceKM,
-		Categories:  categories,
-		Status:      race.EventStatusUpcoming,
-	}
-	service := race.NewService(event, defaultCheckpoints(input.DistanceKM), nil, 10*time.Minute)
 	if s.projectStore == nil {
 		writeProblem(w, http.StatusServiceUnavailable, "MongoDB persistence is required before creating a marathon")
 		return
 	}
-	if err := service.UseStore(s.projectStore); err != nil {
-		writeProblem(w, http.StatusInternalServerError, "marathon project could not be saved")
+	marathonName := strings.TrimSpace(input.Name)
+	if marathonName == "" {
+		writeProblem(w, http.StatusUnprocessableEntity, "marathon name is required")
 		return
 	}
-	if err := s.addProject(id, service); err != nil {
-		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
+	location := strings.TrimSpace(input.Location)
+
+	// Legacy path: no races[] supplied, so synthesize one ungrouped race from the
+	// top-level distance/start/categories. This keeps Event.ID == slugify(name).
+	legacy := len(input.Races) == 0
+	if legacy {
+		input.Races = []raceInput{{
+			Name:        "",
+			DistanceKM:  input.DistanceKM,
+			StartTime:   input.StartTime,
+			Checkpoints: 2,
+		}}
+	}
+
+	marathonID := slugify(marathonName)
+	type preparedRace struct {
+		event       race.Event
+		checkpoints []race.Checkpoint
+	}
+	prepared := make([]preparedRace, 0, len(input.Races))
+	usedIDs := make(map[string]bool, len(input.Races))
+
+	// Validate every race before creating any, so a bad race never leaves a
+	// half-built marathon behind.
+	for i, rc := range input.Races {
+		raceName := strings.TrimSpace(rc.Name)
+		if !legacy && raceName == "" {
+			writeProblem(w, http.StatusUnprocessableEntity, fmt.Sprintf("race %d name is required", i+1))
+			return
+		}
+		if rc.DistanceKM <= 0 {
+			writeProblem(w, http.StatusUnprocessableEntity, raceLabel(raceName, i)+": distance must be greater than zero")
+			return
+		}
+		if rc.Checkpoints < 0 {
+			writeProblem(w, http.StatusUnprocessableEntity, raceLabel(raceName, i)+": number of checkpoints cannot be negative")
+			return
+		}
+		start, err := time.Parse(time.RFC3339, rc.StartTime)
+		if err != nil {
+			writeProblem(w, http.StatusUnprocessableEntity, raceLabel(raceName, i)+": start time must be an RFC3339 timestamp")
+			return
+		}
+
+		event := race.Event{
+			Date:       start,
+			StartTime:  start,
+			Location:   location,
+			DistanceKM: rc.DistanceKM,
+			Status:     race.EventStatusUpcoming,
+		}
+		if legacy {
+			event.ID = s.uniqueProjectID(marathonID, usedIDs)
+			event.Name = marathonName
+			event.Description = "Marathon project"
+			categories := filterCategories(input.Categories)
+			if len(categories) == 0 {
+				categories = defaultCategories(rc.DistanceKM)
+			}
+			event.Categories = categories
+		} else {
+			event.ID = s.uniqueProjectID(marathonID+"-"+slugify(raceName), usedIDs)
+			event.Name = marathonName + " · " + raceName
+			event.Description = "Race in " + marathonName
+			event.Categories = []string{raceName}
+			event.MarathonID = marathonID
+			event.MarathonName = marathonName
+		}
+		prepared = append(prepared, preparedRace{
+			event:       event,
+			checkpoints: race.GenerateCheckpoints(float64(rc.DistanceKM), rc.Checkpoints),
+		})
+	}
+
+	created := make([]race.Event, 0, len(prepared))
+	for _, p := range prepared {
+		service := race.NewService(p.event, p.checkpoints, nil, 10*time.Minute)
+		if err := service.UseStore(s.projectStore); err != nil {
+			writeProblem(w, http.StatusInternalServerError, "marathon project could not be saved")
+			return
+		}
+		if err := s.addProject(p.event.ID, service); err != nil {
+			writeProblem(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		created = append(created, p.event)
+	}
+
+	if legacy {
+		writeJSON(w, http.StatusCreated, created[0])
 		return
 	}
-	writeJSON(w, http.StatusCreated, event)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"marathonId":   marathonID,
+		"marathonName": marathonName,
+		"races":        created,
+	})
+}
+
+func raceLabel(name string, index int) string {
+	if name != "" {
+		return name
+	}
+	return fmt.Sprintf("race %d", index+1)
+}
+
+// uniqueProjectID returns base unless it collides with an existing project or one
+// already chosen in this batch, in which case it appends -2, -3, …
+func (s *Server) uniqueProjectID(base string, used map[string]bool) string {
+	if base == "" {
+		base = "race"
+	}
+	id := base
+	for n := 2; used[id] || s.hasProject(id); n++ {
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+	used[id] = true
+	return id
 }
 
 func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request) {
@@ -1340,6 +1434,14 @@ func (s *Server) projectSummaries(activeID string) []projectSummary {
 			dashboardURL = "/"
 			leaderboardURL = "/leaderboard"
 		}
+		marathonID := event.MarathonID
+		if marathonID == "" {
+			marathonID = event.ID
+		}
+		marathonName := event.MarathonName
+		if marathonName == "" {
+			marathonName = event.Name
+		}
 		summaries = append(summaries, projectSummary{
 			ID:             event.ID,
 			Name:           event.Name,
@@ -1348,6 +1450,8 @@ func (s *Server) projectSummaries(activeID string) []projectSummary {
 			DashboardURL:   dashboardURL,
 			RaceURL:        raceURL,
 			LeaderboardURL: leaderboardURL,
+			MarathonID:     marathonID,
+			MarathonName:   marathonName,
 		})
 	}
 	return summaries
@@ -1563,16 +1667,6 @@ func defaultCategories(distanceKM int) []string {
 		return []string{"5 KM", "11 KM"}
 	default:
 		return []string{fmt.Sprintf("%d KM", distanceKM)}
-	}
-}
-
-func defaultCheckpoints(distanceKM int) []race.Checkpoint {
-	midpoint := float64(distanceKM) / 2
-	return []race.Checkpoint{
-		{ID: "start", Name: "Start", Sequence: 1, DistanceKM: 0},
-		{ID: "cp1", Name: "CP1", Sequence: 2, DistanceKM: midpoint / 2},
-		{ID: "cp2", Name: "CP2", Sequence: 3, DistanceKM: midpoint},
-		{ID: "finish", Name: "Finish", Sequence: 4, DistanceKM: float64(distanceKM)},
 	}
 }
 

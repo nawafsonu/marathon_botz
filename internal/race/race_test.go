@@ -7,6 +7,39 @@ import (
 	"time"
 )
 
+func TestGenerateCheckpoints(t *testing.T) {
+	noIntermediate := GenerateCheckpoints(10, 0)
+	if len(noIntermediate) != 2 {
+		t.Fatalf("count 0 = %d checkpoints, want 2 (Start, Finish)", len(noIntermediate))
+	}
+	if noIntermediate[0].ID != "start" || noIntermediate[1].ID != "finish" {
+		t.Fatalf("unexpected ids: %s, %s", noIntermediate[0].ID, noIntermediate[1].ID)
+	}
+	if noIntermediate[1].DistanceKM != 10 {
+		t.Fatalf("finish distance = %v, want 10", noIntermediate[1].DistanceKM)
+	}
+
+	course := GenerateCheckpoints(20, 3)
+	wantNames := []string{"Start", "CP1", "CP2", "CP3", "Finish"}
+	if len(course) != len(wantNames) {
+		t.Fatalf("count 3 = %d checkpoints, want %d", len(course), len(wantNames))
+	}
+	for i, cp := range course {
+		if cp.Name != wantNames[i] {
+			t.Fatalf("checkpoint %d name = %q, want %q", i, cp.Name, wantNames[i])
+		}
+		if cp.Sequence != i+1 {
+			t.Fatalf("checkpoint %d sequence = %d, want %d", i, cp.Sequence, i+1)
+		}
+	}
+	// Evenly spaced every 5 km across a 20 km course.
+	for i, want := range []float64{0, 5, 10, 15, 20} {
+		if course[i].DistanceKM != want {
+			t.Fatalf("checkpoint %d distance = %v, want %v", i, course[i].DistanceKM, want)
+		}
+	}
+}
+
 func TestRegisterParticipantGeneratesSequentialBibs(t *testing.T) {
 	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
 
@@ -220,6 +253,37 @@ func TestStartRaceMarksEventActiveAndPersists(t *testing.T) {
 	}
 	if !store.last.Event.StartTime.Equal(updated.StartTime) {
 		t.Fatalf("persisted start time = %s, want %s", store.last.Event.StartTime, updated.StartTime)
+	}
+}
+
+func TestStartRaceHonorsScheduledStartTimeWhenStartedEarly(t *testing.T) {
+	event := seedEvent()
+	event.Status = EventStatusUpcoming
+	// Scheduled comfortably in the future, so starting now counts as an early start.
+	scheduled := time.Now().UTC().Add(2 * time.Hour)
+	event.StartTime = scheduled
+	svc := NewService(event, seedCheckpoints(), nil, 10*time.Minute)
+
+	participant, err := svc.RegisterParticipant("Scheduled Runner", "+91 90000 10001", "", "")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	updated, err := svc.StartRace()
+	if err != nil {
+		t.Fatalf("start race: %v", err)
+	}
+	if !updated.StartTime.Equal(scheduled) {
+		t.Fatalf("start time = %s, want scheduled %s", updated.StartTime, scheduled)
+	}
+
+	// The recorded Start checkpoint should use the scheduled time too.
+	profile, err := svc.RunnerProfile(participant.BibNumber)
+	if err != nil {
+		t.Fatalf("runner profile: %v", err)
+	}
+	if len(profile.Timeline) != 1 || !profile.Timeline[0].Timestamp.Equal(scheduled) {
+		t.Fatalf("start checkpoint timestamp = %v, want scheduled %s", profile.Timeline, scheduled)
 	}
 }
 

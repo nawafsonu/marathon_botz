@@ -44,6 +44,7 @@
         <div>
           <strong data-event-status>{{.Snapshot.Event.Status}}</strong>
           <span>{{.Snapshot.Event.Name}}</span>
+          <span>Scheduled start: {{.Snapshot.Event.StartTime.Format "Mon 02 Jan, 15:04"}} UTC</span>
         </div>
         <form id="start-race-form">
           <button class="start-race-button" type="submit">Start Race</button>
