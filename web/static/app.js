@@ -39,9 +39,9 @@ let chestReaderBusy = false;
 let chestReaderLastBib = "";
 let chestReaderStableCount = 0;
 
-// --- Bib Lock: 1-minute client-side lock after a successful checkpoint entry ---
+// --- Bib Lock: 10-minute client-side lock after a successful checkpoint entry ---
 // Maps normalised bib string -> UTC ms timestamp when the lock expires.
-const BIB_LOCK_DURATION_MS = 1 * 60 * 1000; // 1 minute
+const BIB_LOCK_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 const bibLocks = new Map();
 let bibLockCountdownTimer = null;
 

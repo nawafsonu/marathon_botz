@@ -1195,8 +1195,9 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		log race.CheckpointLog
 		err error
 	)
+	nowTime := getInternetTime()
 	if strings.TrimSpace(input.CheckpointID) == "" {
-		log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, time.Now().UTC())
+		log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, nowTime)
 	} else {
 		targetCheckpointID := input.CheckpointID
 		if service.Event().ID != activeService.Event().ID {
@@ -1213,9 +1214,9 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if targetCheckpointID == "" {
-			log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, time.Now().UTC())
+			log, err = service.RecordNextCheckpoint(bibNumber, input.VolunteerID, nowTime)
 		} else {
-			log, err = service.RecordCheckpoint(bibNumber, targetCheckpointID, input.VolunteerID, time.Now().UTC())
+			log, err = service.RecordCheckpoint(bibNumber, targetCheckpointID, input.VolunteerID, nowTime)
 		}
 	}
 	if err != nil {
@@ -2046,4 +2047,21 @@ func resolvePath(path string) string {
 		}
 	}
 	return path
+}
+
+func getInternetTime() time.Time {
+	client := http.Client{
+		Timeout: 500 * time.Millisecond,
+	}
+	resp, err := client.Head("https://www.google.com")
+	if err == nil {
+		defer resp.Body.Close()
+		dateStr := resp.Header.Get("Date")
+		if dateStr != "" {
+			if t, err := time.Parse(time.RFC1123, dateStr); err == nil {
+				return t.UTC()
+			}
+		}
+	}
+	return time.Now().UTC()
 }
