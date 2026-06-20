@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guest Access – Certificate Download · Marathon Tracker</title>
+  <meta name="description" content="Enter your bib number and registered phone number to generate and download your finisher certificate.">
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    .guest-shell {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 1rem;
+    }
+
+    .guest-card {
+      width: min(100%, 28rem);
+      display: grid;
+      gap: 1.25rem;
+    }
+
+    .guest-hero {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: clamp(1.5rem, 4vw, 2.25rem);
+      background: linear-gradient(
+        135deg,
+        rgba(182, 255, 59, 0.09) 0%,
+        rgba(17, 20, 23, 0.97) 48%,
+        rgba(255, 90, 31, 0.07) 100%
+      );
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
+      display: grid;
+      gap: 1.25rem;
+    }
+
+    /* Badge */
+    .guest-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(182, 255, 59, 0.12);
+      border: 1px solid rgba(182, 255, 59, 0.28);
+      border-radius: 999px;
+      padding: 0.28rem 0.8rem;
+      color: var(--lime);
+      font-size: 0.76rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      width: fit-content;
+    }
+
+    .guest-hero h1 {
+      font-size: clamp(2rem, 8vw, 3.4rem);
+      line-height: 0.93;
+      text-transform: uppercase;
+    }
+
+    .guest-hero .sub {
+      color: var(--muted);
+      font-size: 0.875rem;
+      line-height: 1.55;
+    }
+
+    /* Divider */
+    .rule {
+      height: 1px;
+      background: var(--line);
+    }
+
+    /* Credential form */
+    .credential-form {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .credential-form label {
+      display: grid;
+      gap: 0.4rem;
+    }
+
+    .field-hint {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .credential-form input {
+      width: 100%;
+      min-height: 3.2rem;
+      border: 1px solid #303741;
+      border-radius: 8px;
+      background: #090b0d;
+      color: var(--text);
+      padding: 0 1rem;
+      outline: none;
+      font: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .credential-form input:focus {
+      border-color: var(--orange);
+      box-shadow: 0 0 0 3px rgba(255, 90, 31, 0.2);
+    }
+
+    /* Bib gets a bigger font to feel like a race number */
+    #bib-input {
+      font-size: 1.4rem;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* Error state */
+    .error-banner {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      border: 1px solid rgba(255, 77, 95, 0.35);
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      background: rgba(255, 77, 95, 0.08);
+      color: var(--danger);
+      font-size: 0.85rem;
+      font-weight: 700;
+      animation: shake 0.3s ease;
+    }
+
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25%      { transform: translateX(-4px); }
+      75%      { transform: translateX(4px); }
+    }
+
+    .error-icon {
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    /* Submit */
+    .submit-btn {
+      width: 100%;
+      min-height: 3.4rem;
+      font-size: 1rem;
+      font-weight: 900;
+      background: var(--orange);
+      color: #160702;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.18s, transform 0.12s;
+      letter-spacing: 0.02em;
+    }
+
+    .submit-btn:hover {
+      background: var(--orange-2);
+      transform: translateY(-1px);
+    }
+
+    /* Access hint */
+    .access-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      border: 1px solid rgba(182, 255, 59, 0.16);
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+      background: rgba(182, 255, 59, 0.04);
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .access-note .note-icon {
+      color: var(--lime);
+      font-size: 0.9rem;
+      flex-shrink: 0;
+      margin-top: 0.05rem;
+    }
+
+    /* Back link */
+    .back-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-decoration: none;
+      transition: background 0.18s, color 0.18s;
+    }
+
+    .back-link:hover {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <main class="guest-shell">
+    <div class="guest-card">
+
+      <div class="guest-hero">
+        <div class="brand-mark">MT</div>
+
+        <div class="guest-badge">
+          <span aria-hidden="true">🏅</span> Certificate Access
+        </div>
+
+        <div>
+          <h1>Get Your Certificate</h1>
+          <p class="sub">Enter the bib number and phone number you registered with to generate and download your finisher certificate.</p>
+        </div>
+
+        <div class="rule"></div>
+
+        {{if .Error}}
+        <div class="error-banner" role="alert">
+          <span class="error-icon" aria-hidden="true">⚠</span>
+          {{.Error}}
+        </div>
+        {{end}}
+
+        <form method="post" action="/guest-login" class="credential-form" id="guest-credential-form" novalidate>
+          <label for="bib-input">
+            Bib Number
+            <input
+              type="text"
+              id="bib-input"
+              name="bib"
+              value="{{.Bib}}"
+              placeholder="e.g. BIB-042"
+              autocomplete="off"
+              autocapitalize="characters"
+              maxlength="20"
+              required
+              autofocus
+            >
+          </label>
+
+          <label for="phone-input">
+            Registered Phone Number
+            <input
+              type="tel"
+              id="phone-input"
+              name="phone"
+              value="{{.Phone}}"
+              placeholder="e.g. 9876543210"
+              autocomplete="tel"
+              required
+            >
+            <span class="field-hint">Use the number you gave at registration</span>
+          </label>
+
+          <button type="submit" class="submit-btn" id="get-certificate-btn">
+            Get My Certificate →
+          </button>
+        </form>
+      </div>
+
+      <div class="access-note">
+        <span class="note-icon" aria-hidden="true">ℹ</span>
+        <span>Guest access is limited to certificate generation only. Sign in with credentials for full race management.</span>
+      </div>
+
+      <a href="/login" class="back-link" id="back-to-login-link">← Back to Login</a>
+
+    </div>
+  </main>
+  <script>
+    // Normalise bib: uppercase + trim on blur so users see consistent formatting.
+    var bibInput = document.getElementById('bib-input');
+    bibInput.addEventListener('blur', function () {
+      this.value = this.value.trim().toUpperCase();
+    });
+  </script>
+</body>
+</html>

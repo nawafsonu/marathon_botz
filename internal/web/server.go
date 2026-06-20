@@ -170,6 +170,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.staticDir))))
 	s.mux.HandleFunc("GET /login", s.loginPage)
 	s.mux.HandleFunc("POST /login", s.login)
+	s.mux.HandleFunc("GET /guest-login", s.guestLoginPage)
+	s.mux.HandleFunc("POST /guest-login", s.guestLogin)
 	s.mux.HandleFunc("POST /logout", s.logout)
 	s.mux.HandleFunc("GET /", s.dashboard)
 	s.mux.HandleFunc("GET /race", s.racePage)
@@ -399,6 +401,131 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "login page could not be rendered", http.StatusInternalServerError)
 	}
 }
+
+func (s *Server) guestLoginPage(w http.ResponseWriter, r *http.Request) {
+	if s.authManager == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	data := struct {
+		Error string
+		Bib   string
+		Phone string
+	}{}
+	if err := s.templates.ExecuteTemplate(w, "guest_login.html", data); err != nil {
+		http.Error(w, "guest login page could not be rendered", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
+	if s.authManager == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "form could not be read", http.StatusBadRequest)
+		return
+	}
+
+	bib := strings.TrimSpace(r.FormValue("bib"))
+	phone := strings.TrimSpace(r.FormValue("phone"))
+
+	renderError := func(msg string) {
+		w.WriteHeader(http.StatusUnauthorized)
+		data := struct {
+			Error string
+			Bib   string
+			Phone string
+		}{Error: msg, Bib: bib, Phone: phone}
+		_ = s.templates.ExecuteTemplate(w, "guest_login.html", data)
+	}
+
+	if bib == "" || phone == "" {
+		renderError("Bib number and phone number are required.")
+		return
+	}
+
+	// Validate bib + phone against registered participants across all events.
+	bibPath, ok := s.authenticateGuest(bib, phone)
+	if !ok {
+		renderError("No matching runner found. Please check your bib number and phone number.")
+		return
+	}
+
+	token, err := sessionToken()
+	if err != nil {
+		http.Error(w, "session could not be created", http.StatusInternalServerError)
+		return
+	}
+	// Guest sessions last 24 hours and are NOT persisted to disk.
+	const guestTTL = 24 * time.Hour
+	expiresAt := time.Now().UTC().Add(guestTTL)
+	s.sessionMu.Lock()
+	s.sessions[token] = sessionRecord{Username: "__guest__", ExpiresAt: expiresAt}
+	s.sessionMu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		MaxAge:   int(guestTTL.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	// Redirect directly to the runner's certificate.
+	http.Redirect(w, r, bibPath, http.StatusSeeOther)
+}
+
+// authenticateGuest looks up a participant by bib number across all loaded race
+// services and checks if the supplied phone number matches. Returns the
+// certificate URL for that runner on success.
+func (s *Server) authenticateGuest(bib, phone string) (string, bool) {
+	normBib := strings.ToUpper(strings.TrimSpace(bib))
+	normPhone := normalizePhone(phone)
+	if normBib == "" || normPhone == "" {
+		return "", false
+	}
+
+	s.projects.mu.RLock()
+	services := make([]*race.Service, 0, len(s.projects.ids))
+	for _, id := range s.projects.ids {
+		services = append(services, s.projects.services[id])
+	}
+	activeID := s.projects.activeID
+	s.projects.mu.RUnlock()
+
+	for _, svc := range services {
+		for _, p := range svc.Participants() {
+			if strings.ToUpper(strings.TrimSpace(p.BibNumber)) != normBib {
+				continue
+			}
+			if normalizePhone(p.PhoneNumber) != normPhone {
+				continue
+			}
+			// Match — build the certificate URL.
+			eventID := svc.Event().ID
+			base := ""
+			if eventID != activeID {
+				base = "/events/" + eventID
+			}
+			return base + "/runners/" + p.BibNumber + "/certificate", true
+		}
+	}
+	return "", false
+}
+
+// normalizePhone strips all non-digit characters so "9876543210", "+91 98765 43210",
+// and "98765-43210" all compare equal.
+func normalizePhone(phone string) string {
+	var b strings.Builder
+	for _, r := range phone {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if s.authManager == nil {
@@ -1210,14 +1337,34 @@ func (s *Server) basePathForLocked(eventID string) string {
 	return "/events/" + eventID
 }
 
+// isGuestCertificatePath reports whether path is one of the certificate
+// routes that guests are permitted to access.
+func isGuestCertificatePath(path string) bool {
+	// /runners/{bib}/certificate
+	if strings.HasSuffix(path, "/certificate") {
+		return true
+	}
+	return false
+}
+
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if s.authManager == nil {
 		return true
 	}
-	if r.URL.Path == "/login" || strings.HasPrefix(r.URL.Path, "/static/") {
+	if r.URL.Path == "/login" || r.URL.Path == "/guest-login" || strings.HasPrefix(r.URL.Path, "/static/") {
 		return true
 	}
-	if _, ok := s.authenticatedUser(r); ok {
+	user, ok := s.authenticatedUser(r)
+	if ok {
+		if user.Role == auth.RoleGuest {
+			// Guests may only view certificate pages (GET only).
+			if r.Method == http.MethodGet && isGuestCertificatePath(r.URL.Path) {
+				return true
+			}
+			// Redirect to the guest info page so they understand their access level.
+			http.Redirect(w, r, "/guest-login", http.StatusSeeOther)
+			return false
+		}
 		return true
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") || strings.Contains(r.URL.Path, "/api/") {
@@ -1254,7 +1401,7 @@ func (s *Server) canManage(r *http.Request) bool {
 		return true
 	}
 	user, ok := s.authenticatedUser(r)
-	return ok && user.Role == auth.RoleAdmin
+	return ok && (user.Role == auth.RoleAdmin || user.Role == auth.RoleVolunteer)
 }
 
 func (s *Server) authenticatedUser(r *http.Request) (auth.User, bool) {
@@ -1276,6 +1423,10 @@ func (s *Server) authenticatedUser(r *http.Request) (auth.User, bool) {
 	s.sessionMu.Unlock()
 	if !ok {
 		return auth.User{}, false
+	}
+	// Guest sessions are stored with a special sentinel username.
+	if record.Username == "__guest__" {
+		return auth.User{Username: "guest", Role: auth.RoleGuest}, true
 	}
 	return s.authManager.User(record.Username)
 }

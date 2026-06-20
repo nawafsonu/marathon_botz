@@ -28,7 +28,74 @@
         <button type="submit">Sign in</button>
         {{if .Error}}<p class="form-status error" role="alert">{{.Error}}</p>{{end}}
       </form>
+      <div class="guest-divider">
+        <span>or</span>
+      </div>
+      <a href="/guest-login" class="guest-entry-link" id="guest-entry-link">
+        <span class="guest-entry-icon">🏅</span>
+        <span class="guest-entry-text">
+          <strong>Download My Certificate</strong>
+          <small>Enter bib number &amp; phone · certificate access only</small>
+        </span>
+        <span class="guest-entry-arrow">→</span>
+      </a>
     </section>
   </main>
+  <style>
+    .guest-divider {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin: 1.5rem 0 1rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    .guest-divider::before,
+    .guest-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--line);
+    }
+    .guest-entry-link {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      background: rgba(255,255,255,0.03);
+      transition: background 0.2s, border-color 0.2s;
+      cursor: pointer;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .guest-entry-link:hover {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.15);
+    }
+    .guest-entry-icon {
+      font-size: 1.4rem;
+      flex-shrink: 0;
+    }
+    .guest-entry-text {
+      flex: 1;
+      display: grid;
+      gap: 0.1rem;
+    }
+    .guest-entry-text strong {
+      font-size: 0.95rem;
+      font-weight: 800;
+    }
+    .guest-entry-text small {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .guest-entry-arrow {
+      color: var(--muted);
+      font-size: 1.1rem;
+    }
+  </style>
 </body>
 </html>
