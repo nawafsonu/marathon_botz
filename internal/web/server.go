@@ -1226,8 +1226,8 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) configureChestReader(w http.ResponseWriter, r *http.Request) {
-	if !s.canManage(r) {
-		writeProblem(w, http.StatusForbidden, "Only admins can configure the chest reader.")
+	if _, ok := s.authenticatedUser(r); !ok {
+		writeProblem(w, http.StatusUnauthorized, "login is required")
 		return
 	}
 	if _, ok := s.serviceForRequest(w, r); !ok {

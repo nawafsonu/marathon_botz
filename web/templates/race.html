@@ -131,6 +131,7 @@
                 {{end}}
               </select>
             </label>
+            {{end}}
             <div class="chest-reader" data-chest-reader-enabled="{{.ChestReaderEnabled}}">
               <div class="chest-reader-header">
                 <div>
@@ -159,7 +160,6 @@
               </div>
               <div id="chest-reader-candidates" class="chest-reader-candidates" aria-live="polite"></div>
             </div>
-            {{end}}
             <input type="hidden" name="volunteerId" value="{{if .User.Username}}{{.User.Username}}{{else}}volunteer-tablet-1{{end}}">
             <button type="submit" id="checkpoint-submit-btn">Submit</button>
             <p class="form-status" id="checkpoint-status" role="status"></p>
