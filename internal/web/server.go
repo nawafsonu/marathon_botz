@@ -489,7 +489,6 @@ func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bib := strings.TrimSpace(r.FormValue("bib"))
-	name := strings.TrimSpace(r.FormValue("name"))
 
 	renderError := func(msg string) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -498,19 +497,19 @@ func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
 			GuestError string
 			Bib        string
 			Name       string
-		}{Error: "", GuestError: msg, Bib: bib, Name: name}
+		}{Error: "", GuestError: msg, Bib: bib, Name: ""}
 		_ = s.templates.ExecuteTemplate(w, "login.html", data)
 	}
 
-	if bib == "" || name == "" {
-		renderError("Bib number and runner name are required.")
+	if bib == "" {
+		renderError("Bib number is required.")
 		return
 	}
 
-	// Validate bib + name against registered participants across all events.
-	bibPath, ok := s.authenticateGuest(bib, name)
+	// Validate bib against registered participants across all events.
+	bibPath, ok := s.authenticateGuest(bib)
 	if !ok {
-		renderError("No matching runner found. Please check your bib number and name.")
+		renderError("No matching runner found. Please check your bib number.")
 		return
 	}
 
@@ -539,12 +538,10 @@ func (s *Server) guestLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // authenticateGuest looks up a participant by bib number across all loaded race
-// services and checks if the supplied runner name matches. Returns the
-// certificate URL for that runner on success.
-func (s *Server) authenticateGuest(bib, name string) (string, bool) {
+// services. Returns the certificate URL for that runner on success.
+func (s *Server) authenticateGuest(bib string) (string, bool) {
 	normBib := strings.ToUpper(strings.TrimSpace(bib))
-	normName := strings.ToLower(strings.TrimSpace(name))
-	if normBib == "" || normName == "" {
+	if normBib == "" {
 		return "", false
 	}
 
@@ -557,14 +554,10 @@ func (s *Server) authenticateGuest(bib, name string) (string, bool) {
 
 	for _, svc := range services {
 		for _, p := range svc.Participants() {
-			if strings.ToUpper(strings.TrimSpace(p.BibNumber)) != normBib {
-				continue
+			if strings.ToUpper(strings.TrimSpace(p.BibNumber)) == normBib {
+				// Match — build the global certificate URL.
+				return "/runners/" + p.BibNumber + "/certificate", true
 			}
-			if strings.ToLower(strings.TrimSpace(p.Name)) != normName {
-				continue
-			}
-			// Match — build the global certificate URL.
-			return "/runners/" + p.BibNumber + "/certificate", true
 		}
 	}
 	return "", false

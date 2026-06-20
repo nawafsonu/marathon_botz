@@ -51,18 +51,6 @@
               required
             >
           </label>
-          <label for="name-input">
-            Registered Full Name
-            <input
-              type="text"
-              id="name-input"
-              name="name"
-              value="{{.Name}}"
-              placeholder="e.g. John Doe"
-              autocomplete="name"
-              required
-            >
-          </label>
           <button type="submit" style="background: var(--orange); color: #ffffff; font-weight: 900; min-height: 3rem; margin-top: 0.5rem;">Get My Certificate →</button>
           {{if .GuestError}}<p class="form-status error" role="alert" style="margin-top: 0.5rem;">{{.GuestError}}</p>{{end}}
         </form>
