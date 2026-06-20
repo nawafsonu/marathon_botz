@@ -8,6 +8,7 @@ const startRaceForm = document.querySelector("#start-race-form");
 const volunteerForm = document.querySelector("#volunteer-form");
 const navigationSelects = document.querySelectorAll("[data-navigation-select]");
 const basePath = document.querySelector(".app-shell")?.dataset.basePath || "";
+const canManage = document.querySelector(".app-shell")?.dataset.canManage === "true";
 
 const checkpointStatus = document.querySelector("#checkpoint-status");
 const registrationStatus = document.querySelector("#registration-status");
@@ -28,12 +29,83 @@ const chestReaderCandidates = document.querySelector("#chest-reader-candidates")
 const chestReaderConfigForm = document.querySelector("#chest-reader-config-form");
 const chestReaderConfigSubmit = document.querySelector("#chest-reader-config-submit");
 const chestReaderHelp = document.querySelector("#chest-reader-help");
+const bibLockIndicator = document.querySelector("#bib-lock-indicator");
+const checkpointSubmitBtn = document.querySelector("#checkpoint-submit-btn");
+const checkpointBibInput = document.querySelector("#checkpoint-bib-input");
 
 let chestReaderStream = null;
 let chestReaderTimer = null;
 let chestReaderBusy = false;
 let chestReaderLastBib = "";
 let chestReaderStableCount = 0;
+
+// --- Bib Lock: 10-minute client-side lock after a successful checkpoint entry ---
+// Maps normalised bib string -> UTC ms timestamp when the lock expires.
+const BIB_LOCK_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const bibLocks = new Map();
+let bibLockCountdownTimer = null;
+
+function lockBib(bib) {
+  const expiresAt = Date.now() + BIB_LOCK_DURATION_MS;
+  bibLocks.set(bib.toUpperCase(), expiresAt);
+  startBibLockCountdown();
+}
+
+function getBibLockRemainingMs(bib) {
+  const expiresAt = bibLocks.get(bib.toUpperCase());
+  if (!expiresAt) return 0;
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) {
+    bibLocks.delete(bib.toUpperCase());
+    return 0;
+  }
+  return remaining;
+}
+
+function formatLockCountdown(ms) {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function renderBibLockIndicator() {
+  if (!bibLockIndicator || !checkpointBibInput) return;
+  const bib = String(checkpointBibInput.value || "").trim().toUpperCase();
+  if (!bib) {
+    bibLockIndicator.hidden = true;
+    bibLockIndicator.textContent = "";
+    return;
+  }
+  const remaining = getBibLockRemainingMs(bib);
+  if (remaining > 0) {
+    bibLockIndicator.hidden = false;
+    bibLockIndicator.textContent = `⛔ ${bib} is locked — ${formatLockCountdown(remaining)} remaining`;
+    if (checkpointSubmitBtn) checkpointSubmitBtn.disabled = true;
+  } else {
+    bibLockIndicator.hidden = true;
+    bibLockIndicator.textContent = "";
+    if (checkpointSubmitBtn) checkpointSubmitBtn.disabled = false;
+  }
+}
+
+function startBibLockCountdown() {
+  if (bibLockCountdownTimer) return;
+  bibLockCountdownTimer = setInterval(() => {
+    // Expire stale entries.
+    for (const [bib, expiresAt] of bibLocks) {
+      if (Date.now() >= expiresAt) bibLocks.delete(bib);
+    }
+    renderBibLockIndicator();
+    if (bibLocks.size === 0) {
+      clearInterval(bibLockCountdownTimer);
+      bibLockCountdownTimer = null;
+    }
+  }, 1000);
+}
+
+// Update the lock indicator whenever the volunteer changes the bib input.
+checkpointBibInput?.addEventListener("input", renderBibLockIndicator);
 
 function setStatus(node, message, kind = "") {
   if (!node) return;
@@ -62,6 +134,19 @@ checkpointForm?.addEventListener("submit", async (event) => {
     setStatus(checkpointStatus, "Enter a bib number.", "error");
     return;
   }
+
+  // Client-side 10-minute bib lock check.
+  const lockRemaining = getBibLockRemainingMs(bibNumber);
+  if (lockRemaining > 0) {
+    setStatus(
+      checkpointStatus,
+      `⛔ ${bibNumber} is locked for ${formatLockCountdown(lockRemaining)} — wait before re-submitting.`,
+      "error"
+    );
+    renderBibLockIndicator();
+    return;
+  }
+
   const payload = {
     bibNumber,
     // Empty checkpointId means "next checkpoint (automatic)".
@@ -71,9 +156,12 @@ checkpointForm?.addEventListener("submit", async (event) => {
   setStatus(checkpointStatus, "Recording checkpoint...");
   try {
     const log = await postJSON(`${basePath}/api/checkpoint-logs`, payload);
-    setStatus(checkpointStatus, `${log.participant.bibNumber} recorded at ${log.checkpoint.name}.`, "success");
+    // Lock this bib for 10 minutes so it can't be accidentally re-scanned.
+    lockBib(bibNumber);
+    setStatus(checkpointStatus, `✅ ${log.participant.bibNumber} recorded at ${log.checkpoint.name}.`, "success");
     const bibInput = checkpointForm.elements.namedItem("bibNumber");
     bibInput.value = "";
+    renderBibLockIndicator();
     bibInput.focus();
     await refreshState();
   } catch (error) {

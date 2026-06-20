@@ -8,7 +8,7 @@
   <script defer src="/static/app.js"></script>
 </head>
 <body>
-  <div class="app-shell" data-page="race" data-base-path="{{.BasePath}}">
+  <div class="app-shell" data-page="race" data-base-path="{{.BasePath}}" data-can-manage="{{.CanManage}}" data-user-role="{{.User.Role}}">
     <aside class="rail" aria-label="Primary navigation">
       <div class="brand-mark">MT</div>
       <nav>
@@ -30,7 +30,7 @@
       <header class="event-hero race-hero">
         <div>
           <h1>Race Control</h1>
-          <p>{{.Snapshot.Event.Name}} · Select checkpoint and type chest number</p>
+          {{if .CanManage}}<p>{{.Snapshot.Event.Name}} · Select checkpoint and type chest number</p>{{else}}<p>{{.Snapshot.Event.Name}} · Type the runner's bib number to record their checkpoint</p>{{end}}
         </div>
         <div class="hero-metrics" aria-label="Race status">
           <div><strong>{{len .Snapshot.Checkpoints}}</strong><span>Checkpoints</span></div>
@@ -62,7 +62,7 @@
       </section>
       {{end}}
 
-      <section class="race-ops-grid" aria-label="Race operations">
+      <section class="race-ops-grid" aria-label="Race operations" {{if not .CanManage}}hidden{{end}}>
         <section class="panel race-selector-panel">
           <div class="section-heading">
             <div>
@@ -102,6 +102,25 @@
         </section>
       </section>
 
+      {{if not .CanManage}}
+      <section class="panel race-selector-panel volunteer-race-selector" aria-label="Select race">
+        <div class="section-heading">
+          <div>
+            <h2>Select Race</h2>
+            <p>Switch marathon before recording checkpoint entries</p>
+          </div>
+        </div>
+        <label>
+          Race
+          <select id="race-selector-volunteer" name="eventID" aria-label="Select race" data-navigation-select>
+            {{range .Projects}}
+              <option value="{{.RaceURL}}" {{if .Active}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+        </label>
+      </section>
+      {{end}}
+
       <section class="race-grid">
         <section id="checkpoint-entry" class="panel checkpoint-panel race-entry-panel">
           <div class="section-heading">
@@ -114,8 +133,10 @@
           <form id="checkpoint-form" class="stacked-form">
             <label>
               Bib number
-              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="045" autofocus required>
+              <input name="bibNumber" inputmode="text" autocomplete="off" placeholder="045" autofocus required id="checkpoint-bib-input">
             </label>
+            <div id="bib-lock-indicator" class="bib-lock-indicator" hidden aria-live="assertive"></div>
+            {{if .CanManage}}
             <label>
               Checkpoint
               <select name="checkpointId">
@@ -136,7 +157,6 @@
                   <button type="button" class="secondary-button muted-button" id="chest-reader-stop" hidden>Stop</button>
                 </div>
               </div>
-              {{if .CanManage}}
               <div id="chest-reader-config-form" class="chest-reader-config">
                 <label>
                   Local OCR port
@@ -148,15 +168,15 @@
                 </label>
                 <button type="button" class="secondary-button" id="chest-reader-config-submit">Connect OCR</button>
               </div>
-              {{end}}
               <div class="chest-reader-preview" hidden>
                 <video id="chest-reader-video" playsinline muted></video>
                 <canvas id="chest-reader-canvas" width="640" height="480" hidden></canvas>
               </div>
               <div id="chest-reader-candidates" class="chest-reader-candidates" aria-live="polite"></div>
             </div>
-            <input type="hidden" name="volunteerId" value="volunteer-tablet-1">
-            <button type="submit">Submit</button>
+            {{end}}
+            <input type="hidden" name="volunteerId" value="{{if .User.Username}}{{.User.Username}}{{else}}volunteer-tablet-1{{end}}">
+            <button type="submit" id="checkpoint-submit-btn">Submit</button>
             <p class="form-status" id="checkpoint-status" role="status"></p>
           </form>
         </section>
