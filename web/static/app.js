@@ -780,6 +780,7 @@ function updateStats(summary) {
 }
 
 function updateCheckpoints(checkpoints) {
+  checkpoints = checkpoints || [];
   const list = document.querySelector("#checkpoint-list");
   if (list) {
     const isAdmin = list.classList.contains("checkpoint-list-admin");
@@ -908,6 +909,7 @@ async function setStation(cpId, status, row) {
 }
 
 function updateParticipants(participants) {
+  participants = participants || [];
   const select = checkpointForm?.elements.namedItem("participantId");
   if (!select) return;
   const selected = select.value;
@@ -924,6 +926,7 @@ function updateParticipants(participants) {
 }
 
 function updateFeed(feed, state) {
+  feed = feed || [];
   const list = document.querySelector("#live-feed");
   const banner = document.querySelector("#winner-banner");
   if (!list) return;
