@@ -997,7 +997,10 @@ func (s *Server) importRunners(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	result := service.ImportParticipants(rows)
+	event := service.Event()
+	result := service.ImportParticipants(rows, func(bib string) (string, bool) {
+		return s.marathonBibTaken(event.MarathonID, event.ID, bib)
+	})
 	writeJSON(w, http.StatusCreated, result)
 }
 

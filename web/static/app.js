@@ -467,6 +467,14 @@ function parseAnalysisJSON(value) {
 registrationForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(registrationForm);
+  const bibNumber = (form.get("bibNumber") || "").trim();
+  const cleaned = bibNumber.toUpperCase().replace(/^#/, "").replace(/^BIB-/, "");
+  if (cleaned !== "") {
+    if (!/^\d+$/.test(cleaned) || parseInt(cleaned, 10) <= 0) {
+      setStatus(registrationStatus, "Bib number must be a positive integer.", "error");
+      return;
+    }
+  }
   setStatus(registrationStatus, "Registering runner...");
   try {
     const participant = await postJSON(`${basePath}/api/participants`, {
@@ -977,7 +985,7 @@ function renderLeaderboardEntries(entries) {
       <td>${escapeHTML(entry.bibNumber)}</td>
       <td><a href="${basePath}/runners/${encodeURIComponent(entry.bibNumber)}">${escapeHTML(entry.runnerName)}</a></td>
       <td><span class="category-badge">${escapeHTML(entry.category || "—")}</span></td>
-      <td>${escapeHTML(entry.status)}</td>
+      <td><span class="status-badge status-${entry.status.toLowerCase()}">${escapeHTML(entry.status)}</span></td>
       <td>${escapeHTML(entry.latestCheckpoint)}</td>
       <td>${escapeHTML(entry.finishTime)}</td>
       <td>${escapeHTML(entry.gap)}</td>

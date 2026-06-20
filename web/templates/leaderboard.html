@@ -89,7 +89,7 @@
                   <td>{{.BibNumber}}</td>
                   <td><a href="{{$.BasePath}}/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
                   <td><span class="category-badge">{{if .Category}}{{.Category}}{{else}}—{{end}}</span></td>
-                  <td>{{.Status}}</td>
+                  <td><span class="status-badge {{if eq .Status "Finished"}}status-finished{{else if eq .Status "Active"}}status-active{{else if eq .Status "DNF"}}status-dnf{{else}}status-registered{{end}}">{{.Status}}</span></td>
                   <td>{{.LatestCheckpoint}}</td>
                   <td>{{.FinishTime}}</td>
                   <td>{{.Gap}}</td>

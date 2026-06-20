@@ -528,7 +528,7 @@ func TestImportParticipantsUsesMappedBibAndNameColumns(t *testing.T) {
 		{BibNumber: "BIB-018", Name: "Rohan Paul", PhoneNumber: "+91 90000 10018"},
 	}
 
-	result := svc.ImportParticipants(rows)
+	result := svc.ImportParticipants(rows, nil)
 
 	if result.Created != 2 || len(result.Errors) != 0 {
 		t.Fatalf("import result = %+v", result)
@@ -777,3 +777,83 @@ func TestLeaderboardRobustRankingAndFallbackGunTime(t *testing.T) {
 		t.Fatalf("expected Runner B fallback race time to be 52m 00s, got %s", leaderboard[1].RaceTime)
 	}
 }
+
+func TestRegisterParticipantNumericValidation(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+
+	// Non-numeric bib
+	if _, err := svc.RegisterParticipantWithBib("abc", "Name", "", "5 KM", ""); err == nil {
+		t.Fatal("expected error registering non-numeric bib 'abc'")
+	}
+	if _, err := svc.RegisterParticipantWithBib("12a", "Name", "", "5 KM", ""); err == nil {
+		t.Fatal("expected error registering non-numeric bib '12a'")
+	}
+
+	// Non-positive bib
+	if _, err := svc.RegisterParticipantWithBib("0", "Name", "", "5 KM", ""); err == nil {
+		t.Fatal("expected error registering non-positive bib '0'")
+	}
+	if _, err := svc.RegisterParticipantWithBib("-5", "Name", "", "5 KM", ""); err == nil {
+		t.Fatal("expected error registering non-positive bib '-5'")
+	}
+
+	// Valid bibs
+	if _, err := svc.RegisterParticipantWithBib("42", "Name", "", "5 KM", ""); err != nil {
+		t.Fatalf("unexpected error registering valid bib '42': %v", err)
+	}
+	if _, err := svc.RegisterParticipantWithBib("BIB-043", "Name", "", "5 KM", ""); err != nil {
+		t.Fatalf("unexpected error registering valid bib 'BIB-043': %v", err)
+	}
+	if _, err := svc.RegisterParticipantWithBib("#44", "Name", "", "5 KM", ""); err != nil {
+		t.Fatalf("unexpected error registering valid bib '#44': %v", err)
+	}
+}
+
+func TestImportParticipantsValidation(t *testing.T) {
+	svc := NewService(seedEvent(), seedCheckpoints(), nil, 10*time.Minute)
+	// Seed one participant
+	_, _ = svc.RegisterParticipantWithBib("10", "Existing", "", "", "")
+
+	rows := []ImportParticipant{
+		{BibNumber: "abc", Name: "Invalid Format"},                 // Row 2
+		{BibNumber: "0", Name: "Zero Bib"},                         // Row 3
+		{BibNumber: "10", Name: "Already Exists In Race"},           // Row 4
+		{BibNumber: "11", Name: "Already Exists in Marathon"},      // Row 5
+		{BibNumber: "12", Name: "Valid"},                           // Row 6
+	}
+
+	isBibTaken := func(bib string) (string, bool) {
+		if bib == "BIB-011" {
+			return "Other Category Race", true
+		}
+		return "", false
+	}
+
+	result := svc.ImportParticipants(rows, isBibTaken)
+
+	if result.Created != 1 {
+		t.Fatalf("expected 1 created runner, got %d", result.Created)
+	}
+	if len(result.Errors) != 4 {
+		t.Fatalf("expected 4 errors, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	expectedErrors := map[int]string{
+		2: `invalid bib number "abc": must be a positive integer`,
+		3: `invalid bib number "0": must be a positive integer`,
+		4: `BIB-010 already exists in this race`,
+		5: `bib BIB-011 is already registered in Other Category Race`,
+	}
+
+	for _, e := range result.Errors {
+		expectedMsg, ok := expectedErrors[e.Row]
+		if !ok {
+			t.Errorf("unexpected error on row %d: %s", e.Row, e.Message)
+			continue
+		}
+		if e.Message != expectedMsg {
+			t.Errorf("row %d message = %q, want %q", e.Row, e.Message, expectedMsg)
+		}
+	}
+}
+

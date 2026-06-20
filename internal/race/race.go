@@ -464,6 +464,15 @@ func (s *Service) RegisterParticipant(name, phone, category, notes string) (Part
 // volunteer can register a walk-up runner by typing only the bib number after
 // selecting the race; the category is supplied by the caller from the race.
 func (s *Service) RegisterParticipantWithBib(bib, name, phone, category, notes string) (Participant, error) {
+	if strings.TrimSpace(bib) != "" {
+		cleaned := strings.ToUpper(strings.TrimSpace(bib))
+		cleaned = strings.TrimPrefix(cleaned, "#")
+		cleaned = strings.TrimPrefix(cleaned, "BIB-")
+		n, err := strconv.Atoi(cleaned)
+		if err != nil || n <= 0 {
+			return Participant{}, fmt.Errorf("invalid bib number %q: must be a positive integer", bib)
+		}
+	}
 	bib = normalizeBib(bib)
 	name = strings.TrimSpace(name)
 	phone = strings.TrimSpace(phone)
@@ -537,11 +546,11 @@ func (s *Service) DeleteParticipant(bibNumber string) error {
 	return nil
 }
 
-func (s *Service) ImportParticipants(rows []ImportParticipant) ImportResult {
+func (s *Service) ImportParticipants(rows []ImportParticipant, isBibTaken func(bib string) (string, bool)) ImportResult {
 	result := ImportResult{}
 	s.mu.Lock()
 	for i, row := range rows {
-		participant, err := s.importParticipantLocked(row)
+		participant, err := s.importParticipantLocked(row, isBibTaken)
 		if err != nil {
 			result.Errors = append(result.Errors, ImportError{Row: i + 2, Message: err.Error()})
 			continue
@@ -685,17 +694,31 @@ func (s *Service) recordStartCheckpointForRegisteredParticipantsLocked(at time.T
 	}
 }
 
-func (s *Service) importParticipantLocked(row ImportParticipant) (Participant, error) {
+func (s *Service) importParticipantLocked(row ImportParticipant, isBibTaken func(bib string) (string, bool)) (Participant, error) {
 	name := strings.TrimSpace(row.Name)
 	if name == "" {
 		return Participant{}, errors.New("runner name is required")
+	}
+	if strings.TrimSpace(row.BibNumber) != "" {
+		cleaned := strings.ToUpper(strings.TrimSpace(row.BibNumber))
+		cleaned = strings.TrimPrefix(cleaned, "#")
+		cleaned = strings.TrimPrefix(cleaned, "BIB-")
+		n, err := strconv.Atoi(cleaned)
+		if err != nil || n <= 0 {
+			return Participant{}, fmt.Errorf("invalid bib number %q: must be a positive integer", row.BibNumber)
+		}
 	}
 	bib := normalizeBib(row.BibNumber)
 	if bib == "" {
 		bib = fmt.Sprintf("BIB-%03d", s.nextParticipant)
 	}
 	if _, exists := s.participantByBib[bib]; exists {
-		return Participant{}, fmt.Errorf("%s already exists", bib)
+		return Participant{}, fmt.Errorf("%s already exists in this race", bib)
+	}
+	if isBibTaken != nil {
+		if raceName, taken := isBibTaken(bib); taken {
+			return Participant{}, fmt.Errorf("bib %s is already registered in %s", bib, raceName)
+		}
 	}
 	participant := Participant{
 		ID:          fmt.Sprintf("runner-%03d", s.nextParticipant),
