@@ -14,7 +14,7 @@
       <nav>
         <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
         <a class="active" href="{{.BasePath}}/race">Race</a>
-        <a href="#leaderboard">Leaderboard</a>
+        <a href="{{.BasePath}}/leaderboard">Leaderboard</a>
         {{if .CanManage}}<a href="{{.BasePath}}/certificates">Certificates</a>{{end}}
         <a href="{{.BasePath}}/reports/final.csv">Export CSV</a>
       </nav>
@@ -238,7 +238,8 @@
         </section>
       </section>
 
-      <section id="leaderboard" class="panel leaderboard-panel">
+      {{/* The leaderboard now lives on its own full-screen page. */}}
+      {{if false}}<section id="leaderboard" class="panel leaderboard-panel">
         <div class="section-heading">
           <div>
             <h2>Leaderboard</h2>
@@ -284,7 +285,7 @@
             </tbody>
           </table>
         </div>
-      </section>
+      </section>{{end}}
     </main>
   </div>
 </body>

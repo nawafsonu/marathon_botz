@@ -50,12 +50,13 @@ type projectRegistry struct {
 }
 
 type projectSummary struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Location     string `json:"location"`
-	Active       bool   `json:"active"`
-	DashboardURL string `json:"dashboardUrl"`
-	RaceURL      string `json:"raceUrl"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Location       string `json:"location"`
+	Active         bool   `json:"active"`
+	DashboardURL   string `json:"dashboardUrl"`
+	RaceURL        string `json:"raceUrl"`
+	LeaderboardURL string `json:"leaderboardUrl"`
 }
 
 type sessionRecord struct {
@@ -173,11 +174,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /logout", s.logout)
 	s.mux.HandleFunc("GET /", s.dashboard)
 	s.mux.HandleFunc("GET /race", s.racePage)
+	s.mux.HandleFunc("GET /leaderboard", s.leaderboardPage)
 	s.mux.HandleFunc("GET /certificates", s.bulkCertificates)
 	s.mux.HandleFunc("GET /runners/{bib}", s.runnerProfile)
 	s.mux.HandleFunc("GET /runners/{bib}/certificate", s.runnerCertificate)
 	s.mux.HandleFunc("GET /events/{eventID}", s.dashboard)
 	s.mux.HandleFunc("GET /events/{eventID}/race", s.racePage)
+	s.mux.HandleFunc("GET /events/{eventID}/leaderboard", s.leaderboardPage)
 	s.mux.HandleFunc("GET /events/{eventID}/certificates", s.bulkCertificates)
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}", s.runnerProfile)
 	s.mux.HandleFunc("GET /events/{eventID}/runners/{bib}/certificate", s.runnerCertificate)
@@ -281,6 +284,29 @@ func (s *Server) racePage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.templates.ExecuteTemplate(w, "race.html", data); err != nil {
 		http.Error(w, "race page could not be rendered", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) leaderboardPage(w http.ResponseWriter, r *http.Request) {
+	service, ok := s.serviceForRequest(w, r)
+	if !ok {
+		return
+	}
+	data := struct {
+		Snapshot    race.Snapshot
+		Projects    []projectSummary
+		BasePath    string
+		User        auth.User
+		AuthEnabled bool
+	}{
+		Snapshot:    service.Snapshot(),
+		Projects:    s.projectSummaries(service.Event().ID),
+		BasePath:    s.basePathFor(service.Event().ID),
+		User:        s.currentUser(r),
+		AuthEnabled: s.authManager != nil,
+	}
+	if err := s.templates.ExecuteTemplate(w, "leaderboard.html", data); err != nil {
+		http.Error(w, "leaderboard could not be rendered", http.StatusInternalServerError)
 	}
 }
 
@@ -1181,17 +1207,20 @@ func (s *Server) projectSummaries(activeID string) []projectSummary {
 		event := service.Event()
 		raceURL := "/events/" + event.ID + "/race"
 		dashboardURL := "/events/" + event.ID
+		leaderboardURL := "/events/" + event.ID + "/leaderboard"
 		if event.ID == s.projects.activeID {
 			raceURL = "/race"
 			dashboardURL = "/"
+			leaderboardURL = "/leaderboard"
 		}
 		summaries = append(summaries, projectSummary{
-			ID:           event.ID,
-			Name:         event.Name,
-			Location:     event.Location,
-			Active:       event.ID == activeID,
-			DashboardURL: dashboardURL,
-			RaceURL:      raceURL,
+			ID:             event.ID,
+			Name:           event.Name,
+			Location:       event.Location,
+			Active:         event.ID == activeID,
+			DashboardURL:   dashboardURL,
+			RaceURL:        raceURL,
+			LeaderboardURL: leaderboardURL,
 		})
 	}
 	return summaries
