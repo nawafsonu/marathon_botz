@@ -625,7 +625,7 @@ func (s *Service) RecordCheckpoint(bibNumber, checkpointID, volunteerID string, 
 		}
 	}
 
-	if err := s.validateCheckpointLocked(bibNumber, checkpoint, at); err != nil {
+	if err := s.validateCheckpointLocked(bibNumber, checkpoint, volunteerID, at); err != nil {
 		s.mu.Unlock()
 		return CheckpointLog{}, err
 	}
@@ -860,7 +860,7 @@ func (s *Service) RunnerProfile(bibNumber string) (RunnerProfile, error) {
 	}, nil
 }
 
-func (s *Service) validateCheckpointLocked(bibNumber string, checkpoint Checkpoint, at time.Time) error {
+func (s *Service) validateCheckpointLocked(bibNumber string, checkpoint Checkpoint, volunteerID string, at time.Time) error {
 	logs := s.logsForBibLocked(bibNumber)
 	if len(logs) == 0 {
 		return nil
@@ -879,11 +879,13 @@ func (s *Service) validateCheckpointLocked(bibNumber string, checkpoint Checkpoi
 		return ErrOutOfOrderEntry
 	}
 	// Once a volunteer records a bib, lock it for the duplicate window so an
-	// accidental re-scan can't push the runner to the next checkpoint. The
-	// automatic Start record (race-start) is exempt.
+	// accidental re-scan by the SAME volunteer/station can't push the runner to the next checkpoint.
+	// The automatic Start record (race-start) is exempt.
 	if s.duplicateWindow > 0 && last.VolunteerID != raceStartVolunteerID {
-		if elapsed := at.UTC().Sub(last.Timestamp.UTC()); elapsed < s.duplicateWindow {
-			return fmt.Errorf("%w; %s remaining", ErrBibLocked, formatDuration(s.duplicateWindow-elapsed))
+		if volunteerID == last.VolunteerID {
+			if elapsed := at.UTC().Sub(last.Timestamp.UTC()); elapsed < s.duplicateWindow {
+				return fmt.Errorf("%w; %s remaining", ErrBibLocked, formatDuration(s.duplicateWindow-elapsed))
+			}
 		}
 	}
 	return nil
