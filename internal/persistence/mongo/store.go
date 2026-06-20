@@ -114,3 +114,8 @@ func (s *Store) Disconnect(ctx context.Context) error {
 	}
 	return s.client.Disconnect(ctx)
 }
+
+func (s *Store) Database(name string) *mongodriver.Database {
+	return s.client.Database(name)
+}
+

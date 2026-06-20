@@ -61,10 +61,21 @@ func buildServer() (*web.Server, func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	store, err := mongostore.Connect(ctx, uri, env("MONGODB_DATABASE", databaseFromURI(uri, "marathon_tracker")))
+	dbName := env("MONGODB_DATABASE", databaseFromURI(uri, "marathon_tracker"))
+	store, err := mongostore.Connect(ctx, uri, dbName)
 	if err != nil {
 		log.Fatalf("MongoDB persistence unavailable; refusing to start in memory: %v", err)
 	}
+
+	if authManager != nil {
+		col := store.Database(dbName).Collection("volunteers")
+		if err := authManager.UseMongo(col); err != nil {
+			log.Printf("Failed to hook auth manager to MongoDB: %v", err)
+		} else {
+			log.Printf("Hooked auth manager to MongoDB volunteers collection")
+		}
+	}
+
 
 	states, err := store.LoadAll(ctx)
 	if err != nil {

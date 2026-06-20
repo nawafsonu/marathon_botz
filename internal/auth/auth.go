@@ -2,12 +2,18 @@ package auth
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+	mongodriver "go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type Role string
@@ -25,9 +31,10 @@ type User struct {
 }
 
 type Manager struct {
-	mu    sync.RWMutex
-	path  string
-	users map[string]User
+	mu         sync.RWMutex
+	path       string
+	users      map[string]User
+	collection *mongodriver.Collection
 }
 
 func NewManager(path string) (*Manager, error) {
@@ -41,6 +48,44 @@ func NewManager(path string) (*Manager, error) {
 	return manager, nil
 }
 
+func (m *Manager) UseMongo(collection *mongodriver.Collection) error {
+	m.mu.Lock()
+	m.collection = collection
+	m.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	count, err := collection.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		defaults := defaultUsers()
+		for _, u := range defaults {
+			doc := bson.M{
+				"_id":      normalizeUsername(u.Username),
+				"username": u.Username,
+				"password": u.Password,
+				"role":     string(u.Role),
+			}
+			_, err := collection.ReplaceOne(
+				ctx,
+				bson.M{"_id": doc["_id"]},
+				doc,
+				options.Replace().SetUpsert(true),
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (m *Manager) SessionPath() string {
 	if m == nil || strings.TrimSpace(m.path) == "" {
 		return ""
@@ -50,10 +95,31 @@ func (m *Manager) SessionPath() string {
 
 func (m *Manager) Authenticate(username, password string) (User, bool) {
 	username = normalizeUsername(username)
+	password = strings.TrimSpace(password)
+
+	m.mu.RLock()
+	col := m.collection
+	m.mu.RUnlock()
+
+	if col != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var doc struct {
+			Username string `bson:"username"`
+			Password string `bson:"password"`
+			Role     Role   `bson:"role"`
+		}
+		err := col.FindOne(ctx, bson.M{"_id": username}).Decode(&doc)
+		if err != nil || doc.Password != password {
+			return User{}, false
+		}
+		return User{Username: doc.Username, Role: doc.Role}, true
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	user, ok := m.users[username]
-	if !ok || user.Password != strings.TrimSpace(password) {
+	if !ok || user.Password != password {
 		return User{}, false
 	}
 	user.Password = ""
@@ -62,6 +128,25 @@ func (m *Manager) Authenticate(username, password string) (User, bool) {
 
 func (m *Manager) User(username string) (User, bool) {
 	username = normalizeUsername(username)
+
+	m.mu.RLock()
+	col := m.collection
+	m.mu.RUnlock()
+
+	if col != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var doc struct {
+			Username string `bson:"username"`
+			Role     Role   `bson:"role"`
+		}
+		err := col.FindOne(ctx, bson.M{"_id": username}).Decode(&doc)
+		if err != nil {
+			return User{}, false
+		}
+		return User{Username: doc.Username, Role: doc.Role}, true
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	user, ok := m.users[username]
@@ -73,6 +158,34 @@ func (m *Manager) User(username string) (User, bool) {
 }
 
 func (m *Manager) Volunteers() []User {
+	m.mu.RLock()
+	col := m.collection
+	m.mu.RUnlock()
+
+	if col != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cursor, err := col.Find(ctx, bson.M{"role": string(RoleVolunteer)})
+		if err != nil {
+			return nil
+		}
+		defer cursor.Close(ctx)
+		var users []User
+		for cursor.Next(ctx) {
+			var doc struct {
+				Username string `bson:"username"`
+				Role     Role   `bson:"role"`
+			}
+			if err := cursor.Decode(&doc); err == nil {
+				users = append(users, User{Username: doc.Username, Role: doc.Role})
+			}
+		}
+		sort.Slice(users, func(i, j int) bool {
+			return users[i].Username < users[j].Username
+		})
+		return users
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	users := make([]User, 0)
@@ -90,21 +203,50 @@ func (m *Manager) Volunteers() []User {
 }
 
 func (m *Manager) AddVolunteer(username, password string) (User, error) {
-	username = normalizeUsername(username)
+	usernameNorm := normalizeUsername(username)
 	password = strings.TrimSpace(password)
-	if username == "" || password == "" {
+	if usernameNorm == "" || password == "" {
 		return User{}, errors.New("volunteer username and password are required")
+	}
+
+	m.mu.RLock()
+	col := m.collection
+	m.mu.RUnlock()
+
+	if col != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		count, err := col.CountDocuments(ctx, bson.M{"_id": usernameNorm})
+		if err != nil {
+			return User{}, err
+		}
+		if count > 0 {
+			return User{}, fmt.Errorf("%s already exists", username)
+		}
+
+		doc := bson.M{
+			"_id":      usernameNorm,
+			"username": username,
+			"password": password,
+			"role":     string(RoleVolunteer),
+		}
+		_, err = col.InsertOne(ctx, doc)
+		if err != nil {
+			return User{}, err
+		}
+		return User{Username: username, Role: RoleVolunteer}, nil
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.users[username]; exists {
+	if _, exists := m.users[usernameNorm]; exists {
 		return User{}, fmt.Errorf("%s already exists", username)
 	}
 	user := User{Username: username, Password: password, Role: RoleVolunteer}
-	m.users[username] = user
+	m.users[usernameNorm] = user
 	if err := m.saveLocked(); err != nil {
-		delete(m.users, username)
+		delete(m.users, usernameNorm)
 		return User{}, err
 	}
 	user.Password = ""
@@ -112,16 +254,40 @@ func (m *Manager) AddVolunteer(username, password string) (User, error) {
 }
 
 func (m *Manager) DeleteVolunteer(username string) error {
-	username = normalizeUsername(username)
+	usernameNorm := normalizeUsername(username)
+
+	m.mu.RLock()
+	col := m.collection
+	m.mu.RUnlock()
+
+	if col != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var doc struct {
+			Role Role `bson:"role"`
+		}
+		err := col.FindOne(ctx, bson.M{"_id": usernameNorm}).Decode(&doc)
+		if err != nil {
+			return errors.New("volunteer was not found")
+		}
+		if doc.Role != RoleVolunteer {
+			return errors.New("cannot delete non-volunteer user")
+		}
+
+		_, err = col.DeleteOne(ctx, bson.M{"_id": usernameNorm})
+		return err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	user, exists := m.users[username]
+	user, exists := m.users[usernameNorm]
 	if !exists || user.Role != RoleVolunteer {
 		return errors.New("volunteer was not found")
 	}
-	delete(m.users, username)
+	delete(m.users, usernameNorm)
 	if err := m.saveLocked(); err != nil {
-		m.users[username] = user
+		m.users[usernameNorm] = user
 		return err
 	}
 	return nil

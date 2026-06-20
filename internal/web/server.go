@@ -331,6 +331,9 @@ func (s *Server) runnerProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bib := r.PathValue("bib")
+	if targetService, found := s.findServiceForBib(service.Event().MarathonID, bib); found {
+		service = targetService
+	}
 	profile, err := service.RunnerProfile(bib)
 	if err != nil {
 		http.NotFound(w, r)
@@ -359,7 +362,11 @@ func (s *Server) runnerCertificate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	profile, err := service.RunnerProfile(r.PathValue("bib"))
+	bib := r.PathValue("bib")
+	if targetService, found := s.findServiceForBib(service.Event().MarathonID, bib); found {
+		service = targetService
+	}
+	profile, err := service.RunnerProfile(bib)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -910,7 +917,11 @@ func (s *Server) deleteParticipant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := service.DeleteParticipant(r.PathValue("bib")); err != nil {
+	bib := r.PathValue("bib")
+	if targetService, found := s.findServiceForBib(service.Event().MarathonID, bib); found {
+		service = targetService
+	}
+	if err := service.DeleteParticipant(bib); err != nil {
 		writeProblem(w, statusForRaceError(err), err.Error())
 		return
 	}
@@ -1152,6 +1163,11 @@ func (s *Server) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		bibNumber = participant.BibNumber
 	}
+	if bibNumber != "" {
+		if targetService, found := s.findServiceForBib(service.Event().MarathonID, bibNumber); found {
+			service = targetService
+		}
+	}
 	// No checkpoint chosen means "dynamic": record the runner's next checkpoint
 	// in course order, so the volunteer only has to type the bib number.
 	var (
@@ -1265,7 +1281,13 @@ func (s *Server) scanChestNumber(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	candidates := registeredChestReaderCandidates(result, service.Participants())
+	var participants []race.Participant
+	if service.Event().MarathonID != "" {
+		participants = s.marathonParticipants(service.Event().MarathonID)
+	} else {
+		participants = service.Participants()
+	}
+	candidates := registeredChestReaderCandidates(result, participants)
 	trusted := trustedChestReaderCandidate(candidates, reader.MinConfidence())
 	response := chestReaderScanResponse{
 		Enabled:    true,
@@ -1417,7 +1439,11 @@ func (s *Server) analyzeRunner(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	profile, err := service.RunnerProfile(r.PathValue("bib"))
+	bib := r.PathValue("bib")
+	if targetService, found := s.findServiceForBib(service.Event().MarathonID, bib); found {
+		service = targetService
+	}
+	profile, err := service.RunnerProfile(bib)
 	if err != nil {
 		writeProblem(w, http.StatusNotFound, race.ErrInvalidBib.Error())
 		return
@@ -1543,6 +1569,56 @@ func (s *Server) marathonBibTaken(marathonID, eventID, bib string) (string, bool
 		}
 	}
 	return "", false
+}
+
+// findServiceForBib finds the service that has the runner with the given bib.
+// It prioritizes the requested marathonID, but searches all if needed.
+func (s *Server) findServiceForBib(marathonID, bib string) (*race.Service, bool) {
+	bib = race.NormalizeBib(bib)
+	if bib == "" {
+		return nil, false
+	}
+	s.projects.mu.RLock()
+	defer s.projects.mu.RUnlock()
+	// 1. Try to find in the same marathon first
+	if marathonID != "" {
+		for _, id := range s.projects.ids {
+			service := s.projects.services[id]
+			if service.Event().MarathonID == marathonID {
+				for _, participant := range service.Participants() {
+					if race.NormalizeBib(participant.BibNumber) == bib {
+						return service, true
+					}
+				}
+			}
+		}
+	}
+	// 2. Fall back to search all services
+	for _, id := range s.projects.ids {
+		service := s.projects.services[id]
+		for _, participant := range service.Participants() {
+			if race.NormalizeBib(participant.BibNumber) == bib {
+				return service, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func (s *Server) marathonParticipants(marathonID string) []race.Participant {
+	if marathonID == "" {
+		return nil
+	}
+	s.projects.mu.RLock()
+	defer s.projects.mu.RUnlock()
+	var participants []race.Participant
+	for _, id := range s.projects.ids {
+		service := s.projects.services[id]
+		if service.Event().MarathonID == marathonID {
+			participants = append(participants, service.Participants()...)
+		}
+	}
+	return participants
 }
 
 func (s *Server) addProject(id string, service *race.Service) error {
