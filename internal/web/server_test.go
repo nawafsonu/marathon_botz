@@ -765,7 +765,7 @@ func TestCheckpointManagementEndpointAddsCheckpoint(t *testing.T) {
 	}
 }
 
-func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
+func TestRaceAndLeaderboardRenderAsSeparatePages(t *testing.T) {
 	svc := testService(t)
 	handler := NewServer(svc)
 
@@ -777,8 +777,12 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	raceRes := httptest.NewRecorder()
 	handler.ServeHTTP(raceRes, raceReq)
 
-	if dashboardRes.Code != http.StatusOK || raceRes.Code != http.StatusOK {
-		t.Fatalf("dashboard status=%d race status=%d", dashboardRes.Code, raceRes.Code)
+	leaderboardReq := httptest.NewRequest(http.MethodGet, "/leaderboard", nil)
+	leaderboardRes := httptest.NewRecorder()
+	handler.ServeHTTP(leaderboardRes, leaderboardReq)
+
+	if dashboardRes.Code != http.StatusOK || raceRes.Code != http.StatusOK || leaderboardRes.Code != http.StatusOK {
+		t.Fatalf("dashboard status=%d race status=%d leaderboard status=%d", dashboardRes.Code, raceRes.Code, leaderboardRes.Code)
 	}
 	if strings.Contains(dashboardRes.Body.String(), "Race Checkpoint Entry") {
 		t.Fatal("dashboard should not render race checkpoint entry")
@@ -804,8 +808,15 @@ func TestRacePageContainsCheckpointEntryAwayFromDashboard(t *testing.T) {
 	if !strings.Contains(raceRes.Body.String(), `Start Race`) {
 		t.Fatal("race page should render a start race button")
 	}
-	if !strings.Contains(raceRes.Body.String(), `id="leaderboard"`) || !strings.Contains(raceRes.Body.String(), `id="leaderboard-body"`) {
-		t.Fatal("race page should render the live leaderboard")
+	if strings.Contains(dashboardRes.Body.String(), `id="leaderboard-body"`) || strings.Contains(raceRes.Body.String(), `id="leaderboard-body"`) {
+		t.Fatal("dashboard and race pages should not embed the leaderboard")
+	}
+	leaderboardBody := leaderboardRes.Body.String()
+	if !strings.Contains(leaderboardBody, `data-page="leaderboard"`) || !strings.Contains(leaderboardBody, `id="leaderboard-body"`) {
+		t.Fatal("standalone leaderboard page should render the live leaderboard")
+	}
+	if !strings.Contains(dashboardRes.Body.String(), `href="/leaderboard"`) || !strings.Contains(raceRes.Body.String(), `href="/leaderboard"`) {
+		t.Fatal("dashboard and race pages should link to the standalone leaderboard")
 	}
 }
 
@@ -837,6 +848,16 @@ func TestRacePageCanSwitchRaceAndRegisterRunner(t *testing.T) {
 	}
 	if !strings.Contains(body, `id="registration-form"`) {
 		t.Fatal("race page should render runner registration")
+	}
+
+	leaderboardReq := httptest.NewRequest(http.MethodGet, "/events/mumbai-marathon-2026/leaderboard", nil)
+	leaderboardRes := httptest.NewRecorder()
+	handler.ServeHTTP(leaderboardRes, leaderboardReq)
+	if leaderboardRes.Code != http.StatusOK {
+		t.Fatalf("leaderboard page status = %d, want 200; body: %s", leaderboardRes.Code, leaderboardRes.Body.String())
+	}
+	if !strings.Contains(leaderboardRes.Body.String(), `/events/mumbai-marathon-2026/leaderboard`) {
+		t.Fatal("leaderboard race selector should include the selected leaderboard URL")
 	}
 }
 

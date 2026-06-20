@@ -569,7 +569,7 @@ importForm?.addEventListener("submit", async (event) => {
 });
 
 async function refreshState() {
-  if (!document.querySelector("[data-page='dashboard'], [data-page='race']")) return;
+  if (!document.querySelector("[data-page='dashboard'], [data-page='race'], [data-page='leaderboard']")) return;
   const response = await fetch(`${basePath}/api/state`);
   if (!response.ok) return;
   const state = await response.json();

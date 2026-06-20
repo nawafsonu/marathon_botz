@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leaderboard · {{.Snapshot.Event.Name}}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body class="leaderboard-page">
+  <div class="leaderboard-shell app-shell" data-page="leaderboard" data-base-path="{{.BasePath}}">
+    <header class="leaderboard-topbar">
+      <a class="leaderboard-brand" href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}" aria-label="Marathon Tracker dashboard">
+        <span class="brand-mark">MT</span>
+        <span>Marathon Tracker</span>
+      </a>
+      <nav aria-label="Leaderboard navigation">
+        <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}">Dashboard</a>
+        <a href="{{.BasePath}}/race">Race Control</a>
+        <a class="active" href="{{.BasePath}}/leaderboard" aria-current="page">Leaderboard</a>
+      </nav>
+      {{if .AuthEnabled}}
+        <form method="post" action="/logout" class="leaderboard-logout">
+          <span>{{.User.Username}}</span>
+          <button type="submit">Logout</button>
+        </form>
+      {{end}}
+    </header>
+
+    <main class="leaderboard-workspace">
+      <section class="leaderboard-hero">
+        <div class="leaderboard-title">
+          <span class="live-label"><i aria-hidden="true"></i> Live standings</span>
+          <h1>Leaderboard</h1>
+          <p>{{.Snapshot.Event.Name}} · {{.Snapshot.Event.Location}}</p>
+        </div>
+        <div class="leaderboard-controls">
+          <label>
+            Viewing race
+            <select id="leaderboard-race-selector" name="eventID" data-navigation-select>
+              {{range .Projects}}
+                <option value="{{.LeaderboardURL}}" {{if .Active}}selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+          </label>
+          <span class="refresh-note">Updates every 5 seconds</span>
+        </div>
+      </section>
+
+      <section class="leaderboard-summary" aria-label="Race summary">
+        <article><span>Runners</span><strong data-stat="total">{{.Snapshot.Summary.TotalParticipants}}</strong></article>
+        <article><span>Active</span><strong data-stat="active">{{.Snapshot.Summary.Active}}</strong></article>
+        <article><span>Finished</span><strong data-stat="finished">{{.Snapshot.Summary.Finished}}</strong></article>
+        <article><span>Course progress</span><strong><span data-stat="completion">{{.Snapshot.Summary.CourseProgress}}</span><small>%</small></strong></article>
+      </section>
+
+      <section id="leaderboard" class="leaderboard-stage">
+        <div class="leaderboard-stage-heading">
+          <div>
+            <h2>Live race positions</h2>
+            <p>Overall and category standings</p>
+          </div>
+          <div class="leaderboard-category-tabs" id="leaderboard-tabs" role="tablist" aria-label="Filter standings by category">
+            <button class="tab-btn active" data-category="" role="tab" aria-selected="true">All</button>
+            {{range .Snapshot.Event.Categories}}
+              <button class="tab-btn" data-category="{{.}}" role="tab" aria-selected="false">{{.}}</button>
+            {{end}}
+          </div>
+        </div>
+
+        <div class="table-wrap leaderboard-table-wrap">
+          <table class="leaderboard-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Bib</th>
+                <th>Runner</th>
+                <th>Category</th>
+                <th>Status</th>
+                <th>Latest checkpoint</th>
+                <th>Finish time</th>
+                <th>Gap</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body">
+              {{range .Snapshot.Leaderboard}}
+                <tr data-category="{{.Category}}">
+                  <td class="rank">#{{.Rank}}</td>
+                  <td>{{.BibNumber}}</td>
+                  <td><a href="{{$.BasePath}}/runners/{{.BibNumber}}">{{.RunnerName}}</a></td>
+                  <td><span class="category-badge">{{if .Category}}{{.Category}}{{else}}—{{end}}</span></td>
+                  <td>{{.Status}}</td>
+                  <td>{{.LatestCheckpoint}}</td>
+                  <td>{{.FinishTime}}</td>
+                  <td>{{.Gap}}</td>
+                </tr>
+              {{else}}
+                <tr><td colspan="8" class="empty-state">No runners are registered yet.</td></tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
