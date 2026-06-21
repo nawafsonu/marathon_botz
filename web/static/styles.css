@@ -1205,9 +1205,13 @@ tbody tr:nth-child(-n + 3) {
 
 .certificate-header {
   display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+}
+
+.certificate-header:has(.rank-seal) {
   grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 11.5rem);
   gap: clamp(1rem, 2.3vw, 1.5rem);
-  align-items: center;
 }
 
 .certificate-logo {

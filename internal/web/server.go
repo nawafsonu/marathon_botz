@@ -450,13 +450,10 @@ func buildCertificateView(event race.Event, basePath string, profile race.Runner
 	title := "Certificate of Participation"
 	isRanked := false
 	isTopTen := false
-	if profile.Participant.Status == race.RaceStatusFinished {
-		title = "Certificate of Completion"
-		isRanked = profile.Summary.Rank > 0
-	}
-	if isRanked {
+	if profile.Participant.Status == race.RaceStatusFinished && profile.Summary.Rank > 0 && profile.Summary.Rank <= 10 {
 		title = "Ranked Finisher Certificate"
-		isTopTen = profile.Summary.Rank > 0 && profile.Summary.Rank <= 10
+		isRanked = true
+		isTopTen = true
 	}
 	return certificateView{
 		Event:            event,
