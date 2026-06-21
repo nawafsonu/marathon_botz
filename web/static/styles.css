@@ -1100,6 +1100,34 @@ tbody tr:nth-child(-n + 3) {
   color: #111827;
 }
 
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.5cm;
+  }
+
+  .certificate-body {
+    background: #ffffff;
+  }
+
+  .certificate-actions {
+    display: none !important;
+  }
+
+  .certificate-page {
+    padding: 0;
+    width: 100%;
+  }
+
+  .certificate-sheet {
+    box-shadow: none;
+    border: none;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
+
 .certificate-page {
   width: min(100%, 70rem);
   margin: 0 auto;

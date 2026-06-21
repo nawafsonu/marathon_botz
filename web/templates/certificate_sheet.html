@@ -30,55 +30,37 @@
       <p>This certifies that</p>
       <h2>{{.Profile.Participant.Name}}</h2>
       <div class="certificate-bib">{{.Profile.Participant.BibNumber}}</div>
-      {{if .IsRanked}}
+      {{if .IsTopTen}}
         <p>completed the {{.Event.DistanceKM}} KM {{.Event.Name}} with an official ranked finish.</p>
       {{else}}
         <p>participated in the {{.Event.DistanceKM}} KM {{.Event.Name}}.</p>
       {{end}}
     </section>
 
+    {{if .IsTopTen}}
     <div class="certificate-details">
       <section class="certificate-metrics" aria-label="Runner race data">
         <div><span>Status</span><strong>{{.Profile.Participant.Status}}</strong></div>
         <div><span>Rank</span><strong>{{if gt .Profile.Summary.Rank 0}}#{{.Profile.Summary.Rank}}{{else}}-{{end}}</strong></div>
         <div><span>Race Time</span><strong>{{.Profile.Summary.RaceTime}}</strong></div>
-        <div><span>Finish Time</span><strong>{{.Profile.Summary.FinishTime}}</strong></div>
-        <div><span>Latest Checkpoint</span><strong>{{.Profile.Summary.LatestCheckpoint}}</strong></div>
-        <div><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></div>
+        <div><span>Category</span><strong>{{.Profile.Participant.Category}}</strong></div>
       </section>
 
-      {{if .IsTopTen}}
       <section class="certificate-timeline certificate-finish-highlight">
         <div class="section-heading">
           <div>
-            <h3>Official Finish Time</h3>
-            <p>Verified finish time recorded by Marathon Tracker</p>
+            <h3>Official Race Time</h3>
+            <p>Verified time recorded by Marathon Tracker</p>
           </div>
         </div>
         <div class="finish-time-display">
-          <span class="finish-time-label">Finish Time</span>
-          <strong class="finish-time-value">{{.Profile.Summary.FinishTime}}</strong>
-          <span class="finish-time-duration">Race Duration: {{.Profile.Summary.RaceTime}}</span>
+          <span class="finish-time-label">Race Time</span>
+          <strong class="finish-time-value">{{.Profile.Summary.RaceTime}}</strong>
+          <span class="finish-time-duration">Rank #{{.Profile.Summary.Rank}} &middot; {{.Event.DistanceKM}} KM</span>
         </div>
       </section>
-      {{else}}
-      <section class="certificate-timeline">
-        <div class="section-heading">
-          <div>
-            <h3>Checkpoint Record</h3>
-            <p>Official checkpoint data recorded by Marathon Tracker</p>
-          </div>
-        </div>
-        <ol class="timeline">
-          {{range .Profile.Timeline}}
-            <li><strong>{{.Checkpoint.Name}}</strong></li>
-          {{else}}
-            <li class="empty-state">No checkpoint records available.</li>
-          {{end}}
-        </ol>
-      </section>
-      {{end}}
     </div>
+    {{end}}
 
     <footer class="certificate-footer">
       <div>
