@@ -47,6 +47,21 @@
         <div><span>Gap</span><strong>{{.Profile.Summary.Gap}}</strong></div>
       </section>
 
+      {{if .IsTopTen}}
+      <section class="certificate-timeline certificate-finish-highlight">
+        <div class="section-heading">
+          <div>
+            <h3>Official Finish Time</h3>
+            <p>Verified finish time recorded by Marathon Tracker</p>
+          </div>
+        </div>
+        <div class="finish-time-display">
+          <span class="finish-time-label">Finish Time</span>
+          <strong class="finish-time-value">{{.Profile.Summary.FinishTime}}</strong>
+          <span class="finish-time-duration">Race Duration: {{.Profile.Summary.RaceTime}}</span>
+        </div>
+      </section>
+      {{else}}
       <section class="certificate-timeline">
         <div class="section-heading">
           <div>
@@ -56,12 +71,13 @@
         </div>
         <ol class="timeline">
           {{range .Profile.Timeline}}
-            <li><strong>{{.Checkpoint.Name}}</strong><span>{{.Timestamp.Format "15:04:05"}}</span></li>
+            <li><strong>{{.Checkpoint.Name}}</strong></li>
           {{else}}
             <li class="empty-state">No checkpoint records available.</li>
           {{end}}
         </ol>
       </section>
+      {{end}}
     </div>
 
     <footer class="certificate-footer">

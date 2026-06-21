@@ -77,6 +77,7 @@ type certificateView struct {
 	BasePath         string
 	CertificateTitle string
 	IsRanked         bool
+	IsTopTen         bool
 	IssuedAt         time.Time
 }
 
@@ -448,12 +449,14 @@ func (s *Server) bulkCertificates(w http.ResponseWriter, r *http.Request) {
 func buildCertificateView(event race.Event, basePath string, profile race.RunnerProfile, issuedAt time.Time) certificateView {
 	title := "Certificate of Participation"
 	isRanked := false
+	isTopTen := false
 	if profile.Participant.Status == race.RaceStatusFinished {
 		title = "Certificate of Completion"
 		isRanked = profile.Summary.Rank > 0
 	}
 	if isRanked {
 		title = "Ranked Finisher Certificate"
+		isTopTen = profile.Summary.Rank > 0 && profile.Summary.Rank <= 10
 	}
 	return certificateView{
 		Event:            event,
@@ -461,6 +464,7 @@ func buildCertificateView(event race.Event, basePath string, profile race.Runner
 		BasePath:         basePath,
 		CertificateTitle: title,
 		IsRanked:         isRanked,
+		IsTopTen:         isTopTen,
 		IssuedAt:         issuedAt,
 	}
 }
