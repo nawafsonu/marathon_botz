@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"log"
 	"sync"
 	"time"
 )
@@ -1369,7 +1370,9 @@ func persist(store Store, state State) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = store.Save(ctx, state)
+	if err := store.Save(ctx, state); err != nil {
+		log.Printf("[ERROR] Failed to save state to MongoDB for event %q: %v", state.Event.ID, err)
+	}
 }
 
 func isFinish(checkpoint Checkpoint, checkpoints []Checkpoint) bool {
